@@ -4,11 +4,20 @@ import type { Json, JsonSchema, RouterTool } from "./types.js";
 
 /** Choice label meaning "reply in text, call nothing". */
 export const NO_TOOL = "no_tool_needed";
-/** A Choice accepts up to 255 options; one is reserved for NO_TOOL. */
-export const MAX_TOOLS = 254;
+/** Choice label a shard uses to say "the right tool is not in this group". */
+export const NONE_OF_THESE = "none_of_these";
+/**
+ * Most tools one tool question may offer. A Choice accepts 255 options, but state plus the longest
+ * question must also fit Jev's 32k-token window, and below ~400 characters a description stops
+ * telling similar tools apart — so big rosters (Claude Code sends ~280) are shortlisted first.
+ */
+export const MAX_TOOLS = 120;
+export const SHORTLIST_PER_SHARD = 3;
 /** Cap on speculative argument questions fanned out in the same Jev call. */
 const MAX_ARG_QUESTIONS = 96;
 const MAX_DESCRIPTION_CHARS = 1024;
+/** Characters one tool question may spend on descriptions (~12k tokens). */
+const QUESTION_CHAR_BUDGET = 48_000;
 
 export const TOOL_KEY = "tool";
 export const NEEDS_TOOL_KEY = "needs_tool";
@@ -61,11 +70,39 @@ export function planTool(tool: RouterTool): ToolPlan {
 export const argKey = (toolIndex: number, param: string) => `arg:${toolIndex}:${param}`;
 export const statedKey = (toolIndex: number, param: string) => `stated:${toolIndex}:${param}`;
 
-function toolDescription(tool: RouterTool): string | null {
-  const params = Object.keys(tool.parameters?.properties ?? {});
-  const description = tool.description?.trim();
-  if (description) return truncate(description, MAX_DESCRIPTION_CHARS);
-  return params.length ? `Parameters: ${params.join(", ")}` : null;
+function toolCriteria(tools: RouterTool[]): Record<string, string | null> {
+  const limit = Math.min(MAX_DESCRIPTION_CHARS, Math.floor(QUESTION_CHAR_BUDGET / tools.length));
+  const criteria: Record<string, string | null> = {};
+  for (const tool of tools) {
+    const params = Object.keys(tool.parameters?.properties ?? {});
+    // Descriptions lead with what the tool is for; the tail is usage detail Jev doesn't need.
+    const description = tool.description?.trim().slice(0, limit);
+    criteria[tool.name] = description || (params.length ? `Parameters: ${params.join(", ")}` : null);
+  }
+  return criteria;
+}
+
+export const shardKey = (index: number) => `shard:${index}`;
+
+/**
+ * First pass over a roster too big for one question: every shard is ranked in the same Jev call,
+ * and the best few of each go on to the real decision — ranking wide, then judging a shortlist.
+ */
+export function buildShortlistQuestions(tools: RouterTool[]): { questions: Questions; shards: RouterTool[][] } {
+  const shardCount = Math.ceil(tools.length / MAX_TOOLS);
+  const size = Math.ceil(tools.length / shardCount);
+  const shards = Array.from({ length: shardCount }, (_, index) => tools.slice(index * size, (index + 1) * size));
+  const questions: Questions = {};
+  shards.forEach((shard, index) => {
+    questions[shardKey(index)] = {
+      type: "choice",
+      instructions:
+        "Given the conversation, which of these tools would best advance the user's latest request " +
+        "if the assistant called it next?",
+      criteria: { ...toolCriteria(shard), [NONE_OF_THESE]: "None of the tools in this list fits the next step." },
+    };
+  });
+  return { questions, shards };
 }
 
 /**
@@ -78,8 +115,7 @@ export function buildQuestions(
   options: { allowNone: boolean; withArgs: boolean },
 ): { questions: Questions; plans: ToolPlan[] } {
   const plans = tools.map(planTool);
-  const criteria: Record<string, string | null> = {};
-  for (const tool of tools) criteria[tool.name] = toolDescription(tool);
+  const criteria = toolCriteria(tools);
   if (options.allowNone) {
     criteria[NO_TOOL] =
       "No tool call is needed right now: the assistant should reply to the user in plain text " +

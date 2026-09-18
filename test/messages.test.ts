@@ -47,6 +47,11 @@ function setup(canned: Parameters<typeof fakeJev>[0]) {
 }
 
 const bash = { tool: { choice: "Bash" }, needs_tool: { noul: 0.9 } };
+/** How Claude Code really runs: adaptive thinking, and a cache breakpoint on the newest message. */
+const asClaudeCode = { thinking: { type: "adaptive" } };
+const cachedTail = {
+  messages: [{ role: "user", content: [{ type: "text", text: "list the files", cache_control: { type: "ephemeral" } }] }],
+};
 
 describe("POST /v1/messages", () => {
   it("splits block messages into turns Jev can read, skipping thinking", async () => {
@@ -67,7 +72,7 @@ describe("POST /v1/messages", () => {
     expect(tool.type === "choice" && Object.keys(tool.criteria)).toEqual(["Bash", "ExitPlanMode", "web_search", NO_TOOL]);
   });
 
-  it("forces Jev's tool and forwards the subscription headers and query untouched", async () => {
+  it("forces Jev's tool when the conversation isn't cached, forwarding subscription headers and query untouched", async () => {
     const { post, upstream } = setup(bash);
     const res = await post(claudeRequest({ tool_choice: { type: "auto", disable_parallel_tool_use: true } }));
 
@@ -79,18 +84,55 @@ describe("POST /v1/messages", () => {
     expect(call.headers.get("authorization")).toBe("Bearer oauth");
   });
 
-  it("never forces a tool while extended thinking is on, since the API would reject it", async () => {
+  it.each([
+    ["extended thinking is on", asClaudeCode],
+    ["the conversation is prompt-cached", cachedTail],
+  ])("hints instead of forcing when %s, leaving everything the client sent untouched", async (_name, extra) => {
     const { post, upstream } = setup(bash);
-    const body = claudeRequest({ thinking: { type: "enabled", budget_tokens: 2000 } });
+    const body = claudeRequest(extra);
     const res = await post(body);
-    expect(res.headers.get("x-jev-router-reason")).toBe("forcing_unsupported");
+
+    expect(res.headers.get("x-jev-router-mode")).toBe("hint");
+    expect(res.headers.get("x-jev-router-tool")).toBe("Bash");
+    const sent = upstream.calls[0]!.body;
+    expect(sent.tool_choice).toBeUndefined();
+    expect(sent.messages.slice(0, -1)).toEqual(body.messages.slice(0, -1));
+    const last = sent.messages.at(-1).content;
+    expect(last.slice(0, -1)).toEqual(body.messages.at(-1)!.content);
+    expect(last.at(-1).text).toContain('"Bash"');
+  });
+
+  it("does not hint silence: a confident no-tool answer leaves a hinted request alone", async () => {
+    const { post, upstream } = setup({ tool: { choice: NO_TOOL }, needs_tool: { noul: 0.05 } });
+    const body = claudeRequest(asClaudeCode);
+    const res = await post(body);
+    expect(res.headers.get("x-jev-router-reason")).toBe("no_tool_needed");
     expect(upstream.calls[0]!.body).toEqual(body);
   });
 
-  it("still turns tools off under thinking when Jev is sure none is needed", async () => {
-    const { post, upstream } = setup({ tool: { choice: NO_TOOL }, needs_tool: { noul: 0.05 } });
-    await post(claudeRequest({ thinking: { type: "adaptive" } }));
-    expect(upstream.calls[0]!.body.tool_choice).toEqual({ type: "none" });
+  it("shortlists a roster too big for one question, then decides among the survivors", async () => {
+    const many = Array.from({ length: 280 }, (_, i) => ({
+      name: `tool_${i}`,
+      description: `Does thing number ${i}.`,
+      input_schema: { type: "object", properties: { q: { type: "string" } } },
+    }));
+    const jev = fakeJev({
+      "shard:0": { choice: "tool_7" },
+      "shard:1": { choice: "none_of_these" },
+      "shard:2": { choice: "tool_200" },
+      tool: { choice: "tool_200" },
+      needs_tool: { noul: 0.9 },
+    });
+    const upstream = fakeUpstream();
+    const app = createApp({ config: testConfig(), askJev: jev.askJev, fetch: upstream.fetchImpl });
+    const res = await app.request("/v1/messages", { method: "POST", body: JSON.stringify(claudeRequest({ ...asClaudeCode, tools: many })) });
+
+    expect(jev.requests).toHaveLength(2);
+    expect(Object.keys(jev.requests[0]!.questions)).toEqual(["shard:0", "shard:1", "shard:2"]);
+    const final = jev.requests[1]!.questions.tool!;
+    expect(final.type === "choice" && Object.keys(final.criteria)).toEqual(["tool_7", "tool_200", NO_TOOL]);
+    expect(res.headers.get("x-jev-router-mode")).toBe("hint");
+    expect(res.headers.get("x-jev-router-tool")).toBe("tool_200");
   });
 
   it("streams a complete tool_use itself when the tool takes no open-ended input", async () => {

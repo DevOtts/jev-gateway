@@ -47,7 +47,9 @@ function parseBody<Req>(bytes: Uint8Array, encoding: string | undefined): Req | 
 function decisionHeaders(decision: Decision): Record<string, string> {
   const headers: Record<string, string> = { "x-jev-router-mode": decision.mode };
   if (decision.mode === "passthrough") headers["x-jev-router-reason"] = decision.reason.slice(0, 120);
-  if (decision.mode === "forced" || decision.mode === "direct") headers["x-jev-router-tool"] = decision.tool;
+  if (decision.mode === "forced" || decision.mode === "direct" || decision.mode === "hint") {
+    headers["x-jev-router-tool"] = decision.tool;
+  }
   if (decision.jev) {
     headers["x-jev-router-confidence"] = decision.jev.confidence.toFixed(3);
     headers["x-jev-router-latency-ms"] = String(decision.jev.latencyMs);

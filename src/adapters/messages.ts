@@ -87,17 +87,40 @@ function toInput(req: MessagesRequest, maxMessageChars: number): RouterInput | {
 
   const choice = req.tool_choice?.type ?? "auto";
   const thinking = req.thinking?.type !== undefined && req.thinking.type !== "disabled";
+  // Two reasons not to touch tool_choice: the API rejects a forced tool while extended thinking
+  // is on, and any tool_choice change invalidates the cached conversation — which an agent like
+  // Claude Code re-reads on every turn. A trailing hint does neither.
+  const cached = JSON.stringify(req.messages).includes('"cache_control"') || "cache_control" in req;
   return {
     system: textOf(req.system),
     turns,
     tools: toTools(Array.isArray(req.tools) ? req.tools : []),
     toolChoice: choice === "auto" ? "auto" : choice === "any" ? "required" : "decided",
-    // The API rejects tool_choice "tool"/"any" while extended thinking is on; only auto and none remain.
-    canForce: !thinking,
+    steer: thinking || cached ? "hint" : "tool_choice",
   };
 }
 
+/**
+ * Suggest Jev's pick in a block appended after everything the client sent. Cache breakpoints sit
+ * on the client's own blocks, so the cached prefix stays byte-identical to what the client will
+ * resend next turn; the wording leaves the model free to disagree.
+ */
+function withHint(req: MessagesRequest, tool: string): MessagesRequest {
+  const messages = req.messages ?? [];
+  const last = messages.at(-1);
+  if (last?.role !== "user") return req;
+  const hint: Block = {
+    type: "text",
+    text:
+      `<system-reminder>A tool-routing model suggests the "${tool}" tool is the most relevant next step. ` +
+      "Ignore this if it does not fit what the user actually asked for.</system-reminder>",
+  };
+  const content = typeof last.content === "string" ? [{ type: "text", text: last.content }] : last.content;
+  return { ...req, messages: [...messages.slice(0, -1), { ...last, content: [...content, hint] }] };
+}
+
 function apply(req: MessagesRequest, decision: Decision, argsModel?: string): MessagesRequest {
+  if (decision.mode === "hint") return withHint(req, decision.tool);
   const parallel =
     req.tool_choice?.disable_parallel_tool_use === undefined
       ? {}

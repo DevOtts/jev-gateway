@@ -3,9 +3,13 @@ import type { Config } from "./config.js";
 import {
   argKey,
   buildQuestions,
+  buildShortlistQuestions,
   MAX_TOOLS,
   NEEDS_TOOL_KEY,
   NO_TOOL,
+  NONE_OF_THESE,
+  shardKey,
+  SHORTLIST_PER_SHARD,
   statedKey,
   TOOL_KEY,
   type ToolPlan,
@@ -23,6 +27,8 @@ export interface JevTrace {
   topProbabilities: Record<string, number>;
   inputTokens: number;
   latencyMs: number;
+  /** Tools that survived the first pass, when the roster needed one. */
+  shortlist?: string[];
 }
 
 export type Decision = { jev?: JevTrace } & (
@@ -31,6 +37,8 @@ export type Decision = { jev?: JevTrace } & (
   | { mode: "none"; confidence: number }
   /** Jev picked the tool: the LLM only fills in its arguments. */
   | { mode: "forced"; tool: string; kind: RouterTool["kind"]; confidence: number }
+  /** Jev picked the tool, but this request can only be nudged: the LLM is told, not forced. */
+  | { mode: "hint"; tool: string; confidence: number }
   /** Jev picked the tool and every argument: no LLM call at all. */
   | { mode: "direct"; tool: string; args: Record<string, Json>; confidence: number }
 );
@@ -41,7 +49,7 @@ type Answers = SystemOneResult<Questions>["answers"];
 function skipReason(input: RouterInput): string | undefined {
   if (input.turns.length === 0) return "no_messages";
   if (input.tools.length === 0) return "no_tools";
-  if (input.tools.length > MAX_TOOLS) return "too_many_tools";
+  if (input.tools.length > MAX_TOOLS * 255) return "too_many_tools";
   if (new Set(input.tools.map((tool) => tool.name)).size !== input.tools.length) return "duplicate_tool_names";
   if (input.tools.some((tool) => tool.name === NO_TOOL)) return "reserved_tool_name";
   if (input.toolChoice === "decided") return "tool_choice_already_decided";
@@ -82,19 +90,49 @@ function resolveArgs(
   return certainty >= minCertainty ? { args, certainty } : undefined;
 }
 
+/** The strongest few tools of every shard, ranked in a single Jev call. */
+async function shortlist(
+  tools: RouterTool[],
+  state: SystemOneRequest<Questions>["state"],
+  config: Config,
+  askJev: AskJev,
+): Promise<{ tools: RouterTool[]; inputTokens: number }> {
+  const { questions, shards } = buildShortlistQuestions(tools);
+  const result = await askJev({ state, questions, model: config.jevModel });
+  const kept = shards.flatMap((shard, index) => {
+    const answer = result.answers[shardKey(index)];
+    if (answer?.type !== "choice") return [];
+    const ranked = Object.entries(answer.probabilities)
+      .filter(([name]) => name !== NONE_OF_THESE)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, SHORTLIST_PER_SHARD)
+      .map(([name]) => name);
+    return shard.filter((tool) => ranked.includes(tool.name));
+  });
+  return { tools: kept, inputTokens: result.usage.input_tokens };
+}
+
 export async function decide(input: RouterInput, config: Config, askJev: AskJev): Promise<Decision> {
   const skip = skipReason(input);
   if (skip) return { mode: "passthrough", reason: skip };
 
-  const { questions, plans } = buildQuestions(input.tools, {
-    allowNone: input.toolChoice !== "required",
-    withArgs: config.directCalls,
-  });
-
   const startedAt = performance.now();
+  const state = buildState(input, config);
+  let tools = input.tools;
+  let shortlistTokens = 0;
   let result: SystemOneResult<Questions>;
+  let plans: ToolPlan[];
   try {
-    result = await askJev({ state: buildState(input, config), questions, model: config.jevModel });
+    if (tools.length > MAX_TOOLS) {
+      ({ tools, inputTokens: shortlistTokens } = await shortlist(tools, state, config, askJev));
+      if (tools.length === 0) return { mode: "passthrough", reason: "jev_unexpected_answer" };
+    }
+    const built = buildQuestions(tools, {
+      allowNone: input.toolChoice !== "required",
+      withArgs: config.directCalls,
+    });
+    plans = built.plans;
+    result = await askJev({ state, questions: built.questions, model: config.jevModel });
   } catch (error) {
     // Fail open: a Jev outage must never take the gateway down with it.
     return { mode: "passthrough", reason: `jev_error: ${error instanceof Error ? error.message : String(error)}` };
@@ -114,8 +152,9 @@ export async function decide(input: RouterInput, config: Config, askJev: AskJev)
         .sort(([, a], [, b]) => b - a)
         .slice(0, 3),
     ),
-    inputTokens: result.usage.input_tokens,
+    inputTokens: result.usage.input_tokens + shortlistTokens,
     latencyMs: Math.round(performance.now() - startedAt),
+    ...(tools === input.tools ? {} : { shortlist: tools.map((tool) => tool.name) }),
   };
 
   if (picked.confidence < config.minConfidence) return { mode: "passthrough", reason: "low_confidence", jev };
@@ -126,14 +165,15 @@ export async function decide(input: RouterInput, config: Config, askJev: AskJev)
   }
 
   if (!wantsTool) {
-    return config.onNone === "force_none"
+    // A hint can suggest a tool; suggesting silence would only risk ending an agent's turn early.
+    return config.onNone === "force_none" && input.steer !== "hint"
       ? { mode: "none", confidence: picked.confidence, jev }
       : { mode: "passthrough", reason: "no_tool_needed", jev };
   }
 
   const toolIndex = plans.findIndex((plan) => plan.name === picked.choice);
   const plan = plans[toolIndex];
-  const tool = input.tools[toolIndex];
+  const tool = tools[toolIndex];
   if (!plan || !tool) return { mode: "passthrough", reason: "jev_unknown_tool", jev };
   // Provider-run tools can't be forced by name; knowing Jev wants one is still worth logging.
   if (tool.kind === "hosted") return { mode: "passthrough", reason: "hosted_tool_selected", jev };
@@ -148,6 +188,6 @@ export async function decide(input: RouterInput, config: Config, askJev: AskJev)
       jev,
     };
   }
-  if (input.canForce === false) return { mode: "passthrough", reason: "forcing_unsupported", jev };
+  if (input.steer === "hint") return { mode: "hint", tool: plan.name, confidence: picked.confidence, jev };
   return { mode: "forced", tool: plan.name, kind: tool.kind, confidence: picked.confidence, jev };
 }

@@ -80,8 +80,11 @@ export interface RouterInput {
   tools: RouterTool[];
   /** `decided`: the caller already fixed the outcome (`none`, a named tool, …). */
   toolChoice: "auto" | "required" | "decided";
-  /** False when the API would reject a forced tool_choice for this request (default: true). */
-  canForce?: boolean;
+  /**
+   * How the LLM can be steered towards Jev's pick (default `tool_choice`). `hint` appends a note to
+   * the conversation instead, for requests where rewriting tool_choice is rejected or too costly.
+   */
+  steer?: "tool_choice" | "hint";
 }
 
 /** A tool call Jev produced in full, to be rendered in the client's wire format. */
