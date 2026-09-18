@@ -1,0 +1,68 @@
+export interface Config {
+  port: number;
+  /** OpenAI-compatible API root, including the `/v1` suffix. */
+  upstreamBaseUrl: string;
+  /** Replaces the client's Authorization header upstream when set. */
+  upstreamApiKey?: string;
+  /** When set, clients must present this key to use the gateway. */
+  routerApiKey?: string;
+  /** Model used upstream once Jev has already picked the tool. */
+  argsModel?: string;
+  jevModel: string;
+  jevTimeoutMs: number;
+  /** Below this, Jev's tool decision is ignored and the LLM decides. */
+  minConfidence: number;
+  /** Per-argument certainty needed to answer without calling the LLM. */
+  argMinCertainty: number;
+  onNone: "force_none" | "passthrough";
+  directCalls: boolean;
+  maxStateChars: number;
+  maxMessageChars: number;
+}
+
+type Env = Record<string, string | undefined>;
+
+const str = (env: Env, key: string): string | undefined => {
+  const value = env[key]?.trim();
+  return value ? value : undefined;
+};
+
+const num = (env: Env, key: string, fallback: number): number => {
+  const raw = str(env, key);
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new Error(`${key} must be a number, got "${raw}"`);
+  return value;
+};
+
+const bool = (env: Env, key: string, fallback: boolean): boolean => {
+  const raw = str(env, key)?.toLowerCase();
+  if (raw === undefined) return fallback;
+  return raw === "1" || raw === "true" || raw === "yes";
+};
+
+export function loadConfig(env: Env = process.env): Config {
+  const onNone = str(env, "JEV_ON_NONE") ?? "force_none";
+  if (onNone !== "force_none" && onNone !== "passthrough") {
+    throw new Error(`JEV_ON_NONE must be "force_none" or "passthrough", got "${onNone}"`);
+  }
+  const config: Config = {
+    port: num(env, "PORT", 8787),
+    upstreamBaseUrl: (str(env, "UPSTREAM_BASE_URL") ?? "https://api.openai.com/v1").replace(/\/+$/, ""),
+    upstreamApiKey: str(env, "UPSTREAM_API_KEY"),
+    routerApiKey: str(env, "ROUTER_API_KEY"),
+    argsModel: str(env, "ARGS_MODEL"),
+    jevModel: str(env, "JEV_MODEL") ?? "jev-latest",
+    jevTimeoutMs: num(env, "JEV_TIMEOUT_MS", 4000),
+    minConfidence: num(env, "JEV_MIN_CONFIDENCE", 0.7),
+    argMinCertainty: num(env, "JEV_ARG_MIN_CERTAINTY", 0.8),
+    onNone,
+    directCalls: bool(env, "JEV_DIRECT_CALLS", true),
+    maxStateChars: num(env, "JEV_MAX_STATE_CHARS", 60_000),
+    maxMessageChars: num(env, "JEV_MAX_MESSAGE_CHARS", 4_000),
+  };
+  if (config.routerApiKey && !config.upstreamApiKey) {
+    throw new Error("ROUTER_API_KEY requires UPSTREAM_API_KEY (the client key is not valid upstream)");
+  }
+  return config;
+}

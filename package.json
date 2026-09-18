@@ -1,0 +1,32 @@
+{
+  "name": "jev-router",
+  "version": "0.1.0",
+  "description": "OpenAI-compatible LLM gateway that routes tool-selection decisions to TypeSafe's Jev (System One) model",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "codex": "node bin/jev-codex.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "hono": "^4.13.8",
+    "tsx": "^4.23.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  },
+  "bin": {
+    "jev-codex": "bin/jev-codex.mjs"
+  }
+}
