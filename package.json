@@ -16,6 +16,14 @@
   ],
   "license": "MIT",
   "author": "Vinicius Lana",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vinilana/jev-gateway.git"
+  },
+  "homepage": "https://github.com/vinilana/jev-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/vinilana/jev-gateway/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.15"
