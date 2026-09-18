@@ -14,6 +14,8 @@
     "openai",
     "anthropic"
   ],
+  "license": "MIT",
+  "author": "Vinicius Lana",
   "type": "module",
   "engines": {
     "node": ">=22.9"
