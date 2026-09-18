@@ -1,6 +1,7 @@
 # jev-router
 
-An OpenAI-compatible LLM gateway (Chat Completions + Responses API). Point your client — or Codex — at it instead of your LLM provider; whenever a
+An LLM gateway that speaks Chat Completions, the Responses API and the Anthropic Messages API.
+Point your client — or Codex, or Claude Code — at it instead of your LLM provider; whenever a
 request is really asking **"which tool should I call?"**, the router hands that decision to
 [Jev](https://docs.typesafe.ai/introduction) — TypeSafe's System One model — instead of paying a
 reasoning LLM to make it.
@@ -27,14 +28,19 @@ Jev call. The conversation becomes the state; the questions are:
   argument (and "was it stated?" for optional ones), asked speculatively since extra questions are
   nearly free
 
-The answer picks one of four modes, reported in the `x-jev-router-mode` response header:
+The answer picks one of five modes, reported in the `x-jev-router-mode` response header:
 
 | Mode | When | What happens |
 | --- | --- | --- |
 | `direct` | Tool is confident and every argument is closed-set and certain | The router synthesizes the `tool_calls` response itself (streaming included). **No LLM call.** |
 | `forced` | Tool is confident, arguments need an LLM | Forwarded with `tool_choice` set to that function — and to `ARGS_MODEL` if configured, since the hard part is already done |
+| `hint` | Tool is confident, but `tool_choice` can't be rewritten (Anthropic: extended thinking on, or the conversation is prompt-cached) | Forwarded with a one-line suggestion appended *after* the client's last block, so cached prefixes stay intact. The LLM may disagree |
 | `none` | Jev is confident no tool is needed | Forwarded with `tool_choice: "none"` (or untouched with `JEV_ON_NONE=passthrough`) |
 | `passthrough` | Low confidence, the two questions disagree, Jev errored/timed out, no tools, caller already chose | Forwarded byte-for-byte; `x-jev-router-reason` says why |
+
+Rosters over 120 tools (Claude Code sends ~280) don't fit one good question, so they take two Jev
+calls: every shard of the roster is ranked in one call, and the top 3 of each go on to the decision
+above with full-length descriptions.
 
 The router always **fails open**: any Jev problem means the LLM decides, as if the gateway weren't
 there. All other `/v1/*` routes (models, embeddings, …) are proxied unchanged.
@@ -100,6 +106,26 @@ this repo's `.env`. `jev-codex --jev-help` lists the rest (`--jev-status`, `--je
 If the upstream rejects a rewritten request (HTTP 400/422 — some backends only accept
 `tool_choice: "auto"`), the router replays the original, so Codex never sees a router-caused error.
 
+## Use it with Claude Code (local)
+
+```bash
+npm link                 # once, puts `jev-claude` (and `jev-codex`) on your PATH
+jev-claude               # instead of `claude`; every claude argument still works
+jev-claude -p "summarise this repo"
+jev-claude --jev-logs    # second terminal: watch each routing decision live
+```
+
+`jev-claude` starts a background router on `127.0.0.1:8789` forwarding to `https://api.anthropic.com/v1`
+and runs `claude` with only `ANTHROPIC_BASE_URL` set. With no gateway credential alongside it, Claude
+Code keeps using its saved login, so a **claude.ai subscription keeps working** and its limits apply
+as usual; **nothing in `~/.claude` is modified**. The same `--jev-*` flags as `jev-codex` apply.
+
+What Jev can do here is narrower than with Codex, by design of the API rather than the router:
+Claude Code runs with adaptive thinking (a forced `tool_choice` is rejected) and re-reads a cached
+conversation every turn (any `tool_choice` change would invalidate it). So Claude Code requests are
+steered with `hint` mode, `none` is never applied, and `direct` still answers without the LLM when
+a tool's arguments are all closed-set. API callers without thinking or message caching get `forced`.
+
 ## Configuration
 
 See [.env.example](.env.example). The ones worth tuning:
@@ -118,19 +144,24 @@ Each routed request logs one JSON line (mode, reason, Jev's choice/confidence/la
   in parallel, but not mix different tools in one turn; `direct` mode emits exactly one call.
 - Jev is text-only with a 32k-token state budget: images become `[image_url]` placeholders and long
   conversations keep their newest turns (`JEV_MAX_STATE_CHARS`). It is most accurate in English.
-- Chat Completions and the Responses API are routed. The Anthropic Messages format is not — adding
-  it means one more adapter in `src/adapters/`.
+- A hint is a suggestion, not a decision: in `hint` mode the LLM still spends its own reasoning on
+  the choice, so the gain is accuracy on large rosters, not latency or cost.
+- Validated end to end on subscriptions (Codex 0.154 on ChatGPT, Claude Code 2.1 on claude.ai) with
+  `scripts/mock-jev.mjs` standing in for Jev: `forced`/`none` are accepted by the ChatGPT Codex
+  backend, `hint` by Anthropic. Jev's real accuracy on these rosters, and the confidence thresholds,
+  still need tuning against a real `TYPESAFE_API_KEY`.
 
 ## Layout
 
 ```
-src/adapters/      wire formats ↔ neutral shapes: chat.ts (Chat Completions), responses.ts (Responses/Codex)
+src/adapters/      wire formats ↔ neutral shapes: chat.ts, responses.ts (Codex), messages.ts (Claude Code)
 src/state.ts       conversation → Jev state (truncation, newest-turns budget)
 src/questions.ts   tools → Jev questions; detects closed-set parameters
 src/decide.ts      the Jev call and the mode decision
 src/upstream.ts    streaming reverse proxy
 src/app.ts         Hono app: routes, auth, headers, fail-open replay
-bin/jev-codex.mjs  Codex launcher
+bin/                jev-codex / jev-claude launchers (shared logic in launcher.mjs)
+scripts/mock-jev.mjs  local stand-in for Jev, for end-to-end runs without a TypeSafe key
 ```
 
 `pnpm test` runs the suite against fake Jev and upstream transports; no keys needed.

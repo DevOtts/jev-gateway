@@ -34,6 +34,13 @@ function answer(key, question, wanted) {
     const probabilities = Object.fromEntries(options.map((name) => [name, name === choice ? CONFIDENCE : rest]));
     return { type: "choice", choice, confidence: CONFIDENCE, probabilities };
   }
+  if (key.startsWith("shard:")) {
+    // First pass over a big roster: the wanted tool lives in exactly one shard.
+    const options = Object.keys(question.criteria ?? {});
+    const choice = options.includes(wanted) ? wanted : "none_of_these";
+    const rest = (1 - CONFIDENCE) / Math.max(1, options.length - 1);
+    return { type: "choice", choice, confidence: CONFIDENCE, probabilities: Object.fromEntries(options.map((name) => [name, name === choice ? CONFIDENCE : rest])) };
+  }
   if (key === "needs_tool") return { type: "noul", noul: wanted === NO_TOOL ? 0.1 : 0.9 };
   if (question.type === "noul") return { type: "noul", noul: ARG_CERTAINTY };
   if (question.type === "score") return { type: "score", score: 0.5 };
@@ -61,9 +68,10 @@ createServer(async (req, res) => {
   } catch {
     return send(400, { error: "invalid JSON" });
   }
-  const wanted = SCRIPT[Math.min(served, SCRIPT.length - 1)];
-  served++;
   const questions = request.questions ?? {};
+  const wanted = SCRIPT[Math.min(served, SCRIPT.length - 1)];
+  // A shortlist pass and the decision that follows it belong to the same turn of the script.
+  if ("tool" in questions) served++;
   const answers = Object.fromEntries(Object.entries(questions).map(([key, q]) => [key, answer(key, q, wanted)]));
   const state = JSON.stringify(request.state ?? null);
 
