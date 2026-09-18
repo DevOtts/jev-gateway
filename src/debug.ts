@@ -21,18 +21,22 @@ export function redactHeaders(headers: Headers): Record<string, string> {
 
 export type Dump = (kind: string, data: Record<string, unknown>) => void;
 
+// A stream can end without completing; clients (Codex: "Reconnecting…") treat that as a failure.
+const TERMINAL = new Set(["response.completed", "response.incomplete", "response.failed"]);
+
 type OutputItem = { type?: string; name?: string; namespace?: string };
 
 /** What a Responses reply (SSE or JSON) says about itself: enough to see cache hits and tool calls. */
 export function summarizeResponse(text: string): Record<string, unknown> {
   let done: Record<string, unknown> | undefined;
+  let ending: string | undefined;
   // "responses-lite" streams leave `response.output` empty; the items only appear as events.
   const streamed: OutputItem[] = [];
   const parse = (json: string) => {
     try {
       const event = JSON.parse(json) as { type?: string; response?: Record<string, unknown>; item?: OutputItem };
       if (event.type === "response.output_item.done" && event.item) streamed.push(event.item);
-      else if (event.type === "response.completed") done = event.response;
+      else if (event.type && TERMINAL.has(event.type)) [ending, done] = [event.type, event.response];
       else if (!event.type) done = event as Record<string, unknown>;
     } catch {
       // A chunk cut short by the client hanging up.
@@ -45,10 +49,19 @@ export function summarizeResponse(text: string): Record<string, unknown> {
   const { attribution: _perItem, ...usage } = (done.usage ?? {}) as Record<string, unknown>;
   const output = streamed.length ? streamed : Array.isArray(done.output) ? (done.output as OutputItem[]) : [];
   return {
+    ...(ending && ending !== "response.completed"
+      ? { ending, incomplete_details: done.incomplete_details, error: done.error }
+      : {}),
     model: done.model,
     tool_choice: done.tool_choice,
     usage,
-    output: output.map(({ type, name, namespace }) => ({ type, name, namespace })),
+    // Runs of one item type collapse to a count: a derailed reply can hold a hundred of them.
+    output: output.reduce<(OutputItem & { count?: number })[]>((runs, { type, name, namespace }) => {
+      const last = runs.at(-1);
+      if (last && last.type === type && last.name === name) last.count = (last.count ?? 1) + 1;
+      else runs.push({ type, name, namespace });
+      return runs;
+    }, []),
   };
 }
 
