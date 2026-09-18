@@ -35,22 +35,23 @@ export async function runLauncher(spec) {
   const logFile = join(STATE_DIR, `${spec.client}.log`);
   const pidFile = join(STATE_DIR, `${spec.client}.pid`);
 
-  const help = `${spec.name} — ${spec.client} with tool selection routed through Jev
+  const help = `${spec.name}: ${spec.client} with tool selection routed through Jev
 
-  ${spec.name} [${spec.client} args…]   start the router if needed, then run ${spec.client} through it
-  ${spec.name} --jev-start     only start the background router
-  ${spec.name} --jev-status    is the router up, and where does it forward to?
-  ${spec.name} --jev-logs      follow the router's decisions (run in a second terminal)
-  ${spec.name} --jev-dashboard open the monitoring dashboard: is Jev routing, and if not, why?
-  ${spec.name} --jev-stop      stop the background router
-  ${spec.name} --jev-routing on|off   baseline mode: off stops asking Jev but keeps metering tokens
-  ${spec.name} --jev-config    how to point plain \`${spec.client}\` at the router permanently
+  ${spec.name} [${spec.client} args]    start the gateway if needed, then run ${spec.client} through it
+  ${spec.name} --dashboard        open the monitoring dashboard in your browser
+  ${spec.name} --routing on|off   off = baseline mode: stop asking Jev, keep counting tokens
+  ${spec.name} --status           is the gateway running, and where does it forward to?
+  ${spec.name} --logs             follow routing decisions live (use a second terminal)
+  ${spec.name} --start            start the gateway without opening ${spec.client}
+  ${spec.name} --stop             stop the background gateway
+  ${spec.name} --print-config     how to point plain \`${spec.client}\` at the gateway permanently
+  ${spec.name} --gateway-help     this text (\`--help\` shows ${spec.client}'s own help)
 
 Environment (or ${ENV_FILES.at(-1)}):
   TYPESAFE_API_KEY   required — Jev makes the tool-selection call
   ${spec.portEnv}   router port for ${spec.client} (default ${spec.defaultPort})
   ${spec.upstreamHelp}
-  BROWSER            command --jev-dashboard opens the page with; "none" only prints the URL
+  BROWSER            command --dashboard opens the page with; "none" only prints the URL
 `;
 
   const health = async () => {
@@ -71,7 +72,7 @@ Environment (or ${ENV_FILES.at(-1)}):
     if (running) {
       if (running.upstream === upstream) return;
       console.error(`${spec.name}: router on :${port} forwards to ${running.upstream}, expected ${upstream}.`);
-      console.error(`${" ".repeat(spec.name.length)}  Run \`${spec.name} --jev-stop\` and try again.`);
+      console.error(`${" ".repeat(spec.name.length)}  Run \`${spec.name} --stop\` and try again.`);
       process.exit(1);
     }
     if (!process.env.TYPESAFE_API_KEY) {
@@ -148,33 +149,37 @@ Environment (or ${ENV_FILES.at(-1)}):
     }
   };
 
-  const [flag] = process.argv.slice(2);
-  if (flag === "--jev-help") return console.log(help);
-  if (flag === "--jev-stop") return await stopRouter();
-  if (flag === "--jev-routing") {
+  // Only names neither client uses: `--help` and `--config` stay theirs, so those two are spelled
+  // differently here. The original `--jev-*` spellings still work.
+  const LEGACY = { "--jev-config": "--print-config", "--jev-help": "--gateway-help" };
+  const [first] = process.argv.slice(2);
+  const flag = LEGACY[first] ?? first?.replace(/^--jev-(?=dashboard$|routing$|status$|logs$|start$|stop$)/, "--");
+  if (flag === "--gateway-help") return console.log(help);
+  if (flag === "--stop") return await stopRouter();
+  if (flag === "--routing") {
     const wanted = process.argv[3];
-    if (wanted !== "on" && wanted !== "off") return console.error(`usage: ${spec.name} --jev-routing on|off`);
+    if (wanted !== "on" && wanted !== "off") return console.error(`usage: ${spec.name} --routing on|off`);
     await ensureRouter();
     const key = process.env.ROUTER_API_KEY ? `&key=${encodeURIComponent(process.env.ROUTER_API_KEY)}` : "";
     const response = await fetch(`${origin}/dashboard/routing?enabled=${wanted === "on"}${key}`, { method: "POST" });
-    if (!response.ok) return console.error(`${spec.name}: the router refused (${response.status}). Run \`${spec.name} --jev-stop\` and try again.`);
+    if (!response.ok) return console.error(`${spec.name}: the router refused (${response.status}). Run \`${spec.name} --stop\` and try again.`);
     return console.log(
       wanted === "on"
         ? `${spec.name}: routing on — Jev decides again.`
         : `${spec.name}: routing off — baseline mode: requests go straight to the LLM, tokens are still metered.`,
     );
   }
-  if (flag === "--jev-config") return console.log(spec.configHelp(origin));
-  if (flag === "--jev-start") {
+  if (flag === "--print-config") return console.log(spec.configHelp(origin));
+  if (flag === "--start") {
     await ensureRouter();
     return console.log(`${spec.name}: router up on ${origin} → ${spec.upstream()} (logs: ${logFile})`);
   }
-  if (flag === "--jev-status") {
+  if (flag === "--status") {
     const running = await health();
     console.log(running ? `${spec.name}: router up on ${origin} → ${running.upstream}` : `${spec.name}: router is not running`);
     return console.log(`logs: ${logFile}`);
   }
-  if (flag === "--jev-dashboard") {
+  if (flag === "--dashboard") {
     await ensureRouter();
     // `localhost`, not 127.0.0.1: it is the name WSL forwards to a browser running on Windows.
     const base = `http://localhost:${port}/dashboard`;
@@ -183,14 +188,14 @@ Environment (or ${ENV_FILES.at(-1)}):
     const url = peers.length ? `${base}?peers=${peers.join(",")}` : base;
     const served = await fetch(url).then((response) => response.ok, () => false);
     if (!served) {
-      console.error(`${spec.name}: the router on :${port} predates the dashboard. Run \`${spec.name} --jev-stop\` and try again.`);
+      console.error(`${spec.name}: the router on :${port} predates the dashboard. Run \`${spec.name} --stop\` and try again.`);
       process.exit(1);
     }
     console.log(`${spec.name}: dashboard at ${url}`);
     if (process.env.BROWSER !== "none") await openBrowser(url);
     return;
   }
-  if (flag === "--jev-logs") {
+  if (flag === "--logs") {
     mkdirSync(STATE_DIR, { recursive: true });
     closeSync(openSync(logFile, "a"));
     return spawn("tail", ["-n", "30", "-f", logFile], { stdio: "inherit" });
@@ -205,7 +210,7 @@ Environment (or ${ENV_FILES.at(-1)}):
     console.error(`${spec.name}: could not run ${spec.client}: ${error.message}`);
     process.exit(127);
   });
-  // The router is left running for the next session; `--jev-stop` ends it.
+  // The router is left running for the next session; `--stop` ends it.
   child.on("exit", (code, signal) => process.exit(signal ? 1 : (code ?? 0)));
   // Ctrl-C reaches the client directly (same foreground process group); it decides what that means.
   process.on("SIGINT", () => {});

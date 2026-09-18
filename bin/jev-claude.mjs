@@ -13,7 +13,7 @@ await runLauncher({
   // saved claude.ai login, so a Pro/Max subscription (or an existing API key) keeps working as is.
   env: (origin) => ({ ANTHROPIC_BASE_URL: origin }),
   configHelp: (origin) =>
-    `# Keep the router running (jev-claude --jev-start), then either:\n` +
+    `# Keep the router running (jev-claude --start), then either:\n` +
     `#   ANTHROPIC_BASE_URL=${origin} claude\n` +
     `# or add to ~/.claude/settings.json:\n` +
     JSON.stringify({ env: { ANTHROPIC_BASE_URL: origin } }, null, 2),

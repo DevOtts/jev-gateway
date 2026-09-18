@@ -44,7 +44,7 @@ await runLauncher({
     ...Object.entries(provider(origin)).flatMap(([key, value]) => ["-c", `model_providers.jev-gateway.${key}=${value}`]),
   ],
   configHelp: (origin) =>
-    `# Save as ~/.codex/jev.config.toml, keep the router running (jev-codex --jev-start),\n` +
+    `# Save as ~/.codex/jev.config.toml, keep the router running (jev-codex --start),\n` +
     `# then use: codex --profile jev\n` +
     `model_provider = "jev-gateway"\n\n[model_providers.jev-gateway]\n` +
     Object.entries(provider(origin))

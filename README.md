@@ -39,7 +39,7 @@ jev-claude     # use it exactly like `claude`
 **4. Watch it work**
 
 ```bash
-jev-codex --jev-dashboard
+jev-codex --dashboard
 ```
 
 That's it. Your existing login keeps working, nothing in `~/.codex` or `~/.claude` is changed, and
@@ -52,7 +52,7 @@ through the gateway.
   agent. Every argument is passed through, so `jev-codex exec "fix the failing test"` works like
   `codex exec "fix the failing test"`.
 - The gateway keeps running after you close the agent, so the next session starts instantly. Stop it
-  with `--jev-stop`.
+  with `--stop`.
 - Each turn, the gateway asks Jev which tool fits. When Jev is confident, the gateway steers the LLM
   to that tool. When it is not, the request goes through unchanged.
 - If Jev is down, slow, or your key is wrong, every request simply goes straight to the LLM. The
@@ -66,15 +66,15 @@ All of these work with both `jev-codex` and `jev-claude`.
 | Command | What it does |
 | --- | --- |
 | `jev-codex [args]` | Start the gateway if needed, then run Codex through it |
-| `jev-codex --jev-dashboard` | Open the monitoring dashboard in your browser |
-| `jev-codex --jev-routing off` | Baseline mode: stop asking Jev, keep counting tokens |
-| `jev-codex --jev-routing on` | Let Jev decide again |
-| `jev-codex --jev-status` | Is the gateway running, and where does it forward to? |
-| `jev-codex --jev-logs` | Follow routing decisions live (use a second terminal) |
-| `jev-codex --jev-start` | Start the gateway without opening the agent |
-| `jev-codex --jev-stop` | Stop the background gateway (close your sessions first) |
-| `jev-codex --jev-config` | Print settings to point plain `codex` at the gateway permanently |
-| `jev-codex --jev-help` | List all of the above |
+| `jev-codex --dashboard` | Open the monitoring dashboard in your browser |
+| `jev-codex --routing off` | Baseline mode: stop asking Jev, keep counting tokens |
+| `jev-codex --routing on` | Let Jev decide again |
+| `jev-codex --status` | Is the gateway running, and where does it forward to? |
+| `jev-codex --logs` | Follow routing decisions live (use a second terminal) |
+| `jev-codex --start` | Start the gateway without opening the agent |
+| `jev-codex --stop` | Stop the background gateway (close your sessions first) |
+| `jev-codex --print-config` | Print settings to point plain `codex` at the gateway permanently |
+| `jev-codex --gateway-help` | List all of the above |
 
 Codex uses port 8790 and Claude Code uses port 8789. Change them with `JEV_CODEX_PORT` and
 `JEV_CLAUDE_PORT`.
@@ -82,7 +82,7 @@ Codex uses port 8790 and Claude Code uses port 8789. Change them with `JEV_CODEX
 ## Dashboard
 
 ```bash
-jev-codex --jev-dashboard     # or: jev-claude --jev-dashboard
+jev-codex --dashboard     # or: jev-claude --dashboard
 ```
 
 This opens `http://localhost:8790/dashboard`. If no browser window appears, paste that address into
@@ -107,8 +107,8 @@ Switch routing off to measure the same work without Jev. The gateway keeps forwa
 tokens, but never asks Jev and rewrites nothing.
 
 ```bash
-jev-codex --jev-routing off    # do a task
-jev-codex --jev-routing on     # do a similar task
+jev-codex --routing off    # do a task
+jev-codex --routing on     # do a similar task
 ```
 
 The same switch is a button on each gateway card. The "Token use" card then shows both states side
