@@ -256,10 +256,19 @@ a real coding agent does the same task with routing on and off, the gateway mete
 and a hidden verifier scores the result. The tasks are about building, debugging and extending a
 chess rules engine.
 
-First results (Codex, one run per mode, so a signal and not yet a measurement): fixing five
-injected bugs took 4 LLM requests and 76,678 input tokens with routing on, against 6 requests and
-118,709 input tokens without it, and every hidden check passed both times. Details, raw data and
-how to run it yourself are in that repository.
+Results so far, from 40 agent sessions (two chess tasks, five runs per mode, agents run clean with
+no MCP servers or plugins), every one of which passed all hidden checks:
+
+| Medians, routing on vs. off | Output tokens | Input tokens | Wall-clock time |
+| --- | ---: | ---: | ---: |
+| Codex, fixing bugs | -57% | -7% | -39% |
+| Codex, adding a feature | 0% | +2% | +8% |
+| Claude Code (Fable 5.1), fixing bugs | -13% | -19% | +6% |
+| Claude Code (Fable 5.1), adding a feature | -24% | -27% | -26% |
+
+Routing pays off most where an agent's turns are mechanical, and costs a little where there is
+nothing to save. Five runs per cell is still a small sample: the chart, the spread of the
+individual runs, the raw data and how to run it yourself are in that repository.
 
 ## Development
 
