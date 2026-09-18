@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+### Changed
+- How each agent is pointed at a gateway now lives in `bin/clients.mjs`, and `bin/launcher.mjs`
+  exports what is needed to start a gateway process. The
+  [benchmark](https://github.com/vinilana/jev-gateway-bench) uses both, so it drives agents exactly
+  the way `jev-codex` and `jev-claude` do. No change in behaviour.
+
 ## 0.2.1
 
 ### Fixed

@@ -249,6 +249,18 @@ Each request also logs one JSON line to stdout, or to `~/.jev-gateway/<client>.l
 - The default confidence thresholds are starting points. Use the dashboard and baseline mode to tune
   them for your own work.
 
+## Benchmark
+
+Is it worth it? [jev-gateway-bench](https://github.com/vinilana/jev-gateway-bench) measures that:
+a real coding agent does the same task with routing on and off, the gateway meters every token,
+and a hidden verifier scores the result. The tasks are about building, debugging and extending a
+chess rules engine.
+
+First results (Codex, one run per mode, so a signal and not yet a measurement): fixing five
+injected bugs took 4 LLM requests and 76,678 input tokens with routing on, against 6 requests and
+118,709 input tokens without it, and every hidden check passed both times. Details, raw data and
+how to run it yourself are in that repository.
+
 ## Development
 
 ```bash
@@ -271,7 +283,7 @@ src/usage.ts          token usage read from a reply, normalised across providers
 src/app.ts            routes, auth, headers, and the resend-on-rejection fallback
 src/events.ts         recent request metadata kept in memory and restored from the log
 src/dashboard.ts      serves /dashboard (dashboard.html is the whole page, no build step)
-bin/                  jev-codex and jev-claude launchers (shared logic in launcher.mjs)
+bin/                  jev-codex and jev-claude launchers (launcher.mjs, clients.mjs)
 scripts/mock-jev.mjs  local stand-in for Jev
 ```
 
