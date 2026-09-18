@@ -62,7 +62,9 @@ function collect(payload: unknown, into: Partial<Usage>): void {
  */
 export async function readUsage(response: Response): Promise<Usage | undefined> {
   const found: Partial<Usage> = {};
-  const streaming = response.headers.get("content-type")?.includes("text/event-stream") ?? false;
+  // Told apart by content, not by header: the ChatGPT Codex backend streams events without
+  // sending any content-type at all.
+  let streaming: boolean | undefined;
   let pending = "";
   const scan = (line: string) => {
     // Most stream events are text deltas; only the few that mention usage are worth parsing.
@@ -76,6 +78,7 @@ export async function readUsage(response: Response): Promise<Usage | undefined> 
   try {
     for await (const chunk of response.body?.pipeThrough(new TextDecoderStream()) ?? []) {
       pending += chunk;
+      streaming ??= /^\s*$/.test(pending) ? undefined : !/^\s*[{[]/.test(pending);
       if (!streaming) continue;
       const lines = pending.split("\n");
       pending = lines.pop() ?? "";

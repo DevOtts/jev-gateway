@@ -29,6 +29,14 @@ describe("readUsage", () => {
     expect(usage).toEqual({ input: 13750, cached: 9600, cacheWrite: 0, output: 48, reasoning: 32 });
   });
 
+  it("recognises a stream that comes without a content-type, as the ChatGPT Codex backend sends it", async () => {
+    const body = `event: response.completed\ndata: ${JSON.stringify({
+      type: "response.completed",
+      response: { usage: { attribution: { items: { a: { input_tokens: 1 } } }, input_tokens: 5713, input_tokens_details: { cached_tokens: 4152 }, output_tokens: 7 } },
+    })}\n\n`;
+    expect(await readUsage(new Response(body))).toMatchObject({ input: 5713, cached: 4152, output: 7 });
+  });
+
   it("adds Anthropic's three input buckets into one total and takes the final output count", async () => {
     const usage = await readUsage(
       sse([
