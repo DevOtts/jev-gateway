@@ -148,5 +148,6 @@ export async function decide(input: RouterInput, config: Config, askJev: AskJev)
       jev,
     };
   }
+  if (input.canForce === false) return { mode: "passthrough", reason: "forcing_unsupported", jev };
   return { mode: "forced", tool: plan.name, kind: tool.kind, confidence: picked.confidence, jev };
 }

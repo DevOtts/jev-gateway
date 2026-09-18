@@ -3,6 +3,7 @@ import { brotliDecompressSync, gunzipSync, inflateSync, zstdDecompressSync } fro
 import { Hono, type Context } from "hono";
 import type { Adapter } from "./adapters/adapter.js";
 import { chatAdapter } from "./adapters/chat.js";
+import { messagesAdapter } from "./adapters/messages.js";
 import { responsesAdapter } from "./adapters/responses.js";
 import type { Config } from "./config.js";
 import { decide, type AskJev, type Decision } from "./decide.js";
@@ -119,17 +120,28 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () =
 
   /**
    * Dry run: what would the router do with this body? Calls Jev, never upstream.
-   * Accepts either wire format (chat.completions `messages`, or Responses `input`).
+   * Accepts any routed wire format; `?format=chat|responses|messages` overrides the guess.
    */
   app.post("/router/decide", async (c) => {
     const req = parseBody<Record<string, unknown>>(new Uint8Array(await c.req.arrayBuffer()), undefined);
     if (!req) return c.json({ error: { message: "Body must be a JSON object", type: "invalid_request_error" } }, 400);
-    const adapter = ("messages" in req ? chatAdapter : responsesAdapter) as Adapter<AnyRequest>;
+    const adapters = { chat: chatAdapter, responses: responsesAdapter, messages: messagesAdapter };
+    // Chat Completions and Anthropic Messages both use `messages`; only Anthropic has a top-level
+    // `system` or tools described by `input_schema`.
+    const tools = Array.isArray(req.tools) ? (req.tools as Record<string, unknown>[]) : [];
+    const guess = !("messages" in req)
+      ? "responses"
+      : "system" in req || tools.some((tool) => "input_schema" in tool)
+        ? "messages"
+        : "chat";
+    const format = (c.req.query("format") ?? guess) as keyof typeof adapters;
+    const adapter = (adapters[format] ?? adapters[guess]) as Adapter<AnyRequest>;
     return c.json(await decideFor(adapter, req));
   });
 
   app.post("/v1/chat/completions", route(chatAdapter));
   app.post("/v1/responses", route(responsesAdapter));
+  app.post("/v1/messages", route(messagesAdapter));
 
   // Everything else (models, embeddings, …) is proxied untouched.
   app.all("/v1/*", (c) => forward(c.req.raw, config, fetchImpl));

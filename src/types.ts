@@ -80,6 +80,8 @@ export interface RouterInput {
   tools: RouterTool[];
   /** `decided`: the caller already fixed the outcome (`none`, a named tool, …). */
   toolChoice: "auto" | "required" | "decided";
+  /** False when the API would reject a forced tool_choice for this request (default: true). */
+  canForce?: boolean;
 }
 
 /** A tool call Jev produced in full, to be rendered in the client's wire format. */
