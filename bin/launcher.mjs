@@ -103,16 +103,28 @@ Environment (or ${ENV_FILES.at(-1)}):
     process.exit(1);
   };
 
-  const stopRouter = () => {
-    if (!existsSync(pidFile)) return console.log(`${spec.name}: no background router recorded.`);
-    const pid = Number(readFileSync(pidFile, "utf8"));
-    try {
-      process.kill(pid);
-      console.log(`${spec.name}: stopped router (pid ${pid}).`);
-    } catch {
-      console.log(`${spec.name}: router was not running.`);
+  // Pid files written before the project was renamed; a router started back then is still running.
+  const legacyPidFile = join(homedir(), ".jev-router", `${spec.client}.pid`);
+
+  const stopRouter = async () => {
+    // Whoever answers on the port is the router to stop; pid files only cover ones that don't say.
+    const candidates = [(await health())?.pid];
+    for (const file of [pidFile, legacyPidFile]) {
+      if (existsSync(file)) candidates.push(Number(readFileSync(file, "utf8")));
+      rmSync(file, { force: true });
     }
-    rmSync(pidFile, { force: true });
+    const pids = [...new Set(candidates.filter((pid) => Number.isInteger(pid) && pid > 0))];
+    let stopped = false;
+    for (const pid of pids) {
+      try {
+        process.kill(pid);
+        stopped = true;
+        console.log(`${spec.name}: stopped router (pid ${pid}).`);
+      } catch {
+        // Already gone.
+      }
+    }
+    if (!stopped) console.log(`${spec.name}: no router was running.`);
   };
 
   /** Whichever opener this platform has; under WSL the browser lives on the Windows side. */
@@ -137,7 +149,7 @@ Environment (or ${ENV_FILES.at(-1)}):
 
   const [flag] = process.argv.slice(2);
   if (flag === "--jev-help") return console.log(help);
-  if (flag === "--jev-stop") return stopRouter();
+  if (flag === "--jev-stop") return await stopRouter();
   if (flag === "--jev-config") return console.log(spec.configHelp(origin));
   if (flag === "--jev-start") {
     await ensureRouter();
