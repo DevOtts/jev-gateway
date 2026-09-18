@@ -42,7 +42,13 @@
   .router .why { color: var(--ink-2); }
   .router .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
   .s-routing { --state: var(--good); } .s-passthrough { --state: var(--warning); } .s-failing { --state: var(--critical); }
-  .s-idle, .s-offline { --state: var(--muted); }
+  .s-idle, .s-offline, .s-baseline { --state: var(--muted); }
+  .router .switch { justify-self: start; font: inherit; font-size: 12px; color: var(--ink); background: none; border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .router .switch:hover { background: var(--wash); }
+  .compare { width: 100%; border-collapse: collapse; }
+  .compare th, .compare td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; }
+  .compare th:first-child, .compare td:first-child { text-align: left; color: var(--ink-2); font-weight: 400; }
+  .compare .delta { color: var(--ink-2); font-size: 12px; }
   .s-passthrough .icon { color: #0b0b0b; }
 
   .tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
@@ -119,12 +125,19 @@
   </section>
 
   <section class="card">
+    <h2>Token use: with Jev routing vs. baseline</h2>
+    <p class="note" id="compare-note"></p>
+    <div class="scroll"><table class="compare" id="compare"></table></div>
+  </section>
+
+  <section class="card">
     <h2>Recent requests</h2>
     <p class="note" id="note"></p>
     <div class="scroll"><table>
       <thead><tr>
         <th>Time</th><th>Client</th><th>Path</th><th>Model</th><th class="num">Tools</th><th>Mode</th><th>Tool</th>
         <th class="num">Conf.</th><th>Reason</th><th class="num">Status</th><th class="num">Jev ms</th>
+        <th class="num">In</th><th class="num">Out</th><th class="num">Secs</th>
       </tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
@@ -162,6 +175,7 @@ const REASONS = {
   duplicate_tool_names: ["Jev not asked", "Two tools share a name."],
   reserved_tool_name: ["Jev not asked", "A tool is named no_tool_needed, which the router reserves."],
   tool_choice_already_decided: ["Jev not asked", "The client already fixed tool_choice itself."],
+  routing_disabled: ["Jev not asked", "Routing is switched off (baseline mode): tokens are metered, Jev is never asked."],
   disabled_by_header: ["Jev not asked", "The client sent x-jev-gateway: off."],
   unparseable_body: ["Jev not asked", "The body wasn't readable JSON; upstream gets to reject it."],
   low_confidence: ["Jev asked", "Jev's confidence was below JEV_MIN_CONFIDENCE."],
@@ -185,6 +199,8 @@ const sources = [...ports].map((port) => ({
   own: port === ownPort,
   // Another router has its own key, if any; ours is only ever sent back to where it came from.
   url: port === ownPort ? "/dashboard/events?" + (key ? "key=" + encodeURIComponent(key) + "&" : "") : `${location.protocol}//${location.hostname}:${port}/dashboard/events?`,
+  // Same rule for the routing switch: a bodyless POST, so crossing ports needs no preflight.
+  routingUrl: port === ownPort ? "/dashboard/routing?" + (key ? "key=" + encodeURIComponent(key) + "&" : "") : `${location.protocol}//${location.hostname}:${port}/dashboard/routing?`,
   events: [], lastSeq: 0, router: undefined, up: false, seen: false, misses: 0,
 }));
 
@@ -203,6 +219,7 @@ const reasonKey = (reason) => (reason.startsWith("jev_error") ? "jev_error" : re
 const failed = (event) => event.mode === "passthrough" && (REASONS[reasonKey(event.reason ?? "")] ?? [])[0] === "Jev failed";
 const category = (event) => (failed(event) ? "failed" : event.mode);
 const routed = (event) => event.mode !== "passthrough";
+const baseline = (event) => event.reason === "routing_disabled";
 const at = (event) => Date.parse(event.time);
 
 const int = (n) => Math.round(n).toLocaleString("en-US");
@@ -240,6 +257,9 @@ async function poll(source) {
 function status(source, now) {
   if (!source.up) return ["offline", "×", "Offline", "This router isn't answering. Start it again to keep routing."];
   const recent = source.events.filter((event) => now - at(event) < IDLE_MS);
+  if (source.router?.routing === false) {
+    return ["baseline", "◌", "Baseline — routing off", `Jev is switched off: ${recent.length} request${recent.length === 1 ? "" : "s"} in the last 5 minutes went straight to the LLM, metered for comparison.`];
+  }
   if (recent.length === 0) {
     const last = source.events.at(-1);
     return ["idle", "–", "Idle", "No requests in the last 5 minutes" + (last ? `; the last one was ${ago(now - at(last))} ago (${last.mode}).` : ".")];
@@ -260,6 +280,17 @@ function tally(keys) {
   return [...counts].sort((a, b) => b[1] - a[1]);
 }
 
+async function setRouting(source, enabled) {
+  try {
+    const response = await fetch(source.routingUrl + "enabled=" + enabled, { method: "POST", signal: AbortSignal.timeout(1500) });
+    if (response.ok) source.router.routing = (await response.json()).routing;
+  } catch {
+    // The next poll shows the router's real state either way.
+  }
+  signature = "";
+  render();
+}
+
 function renderRouters(now) {
   $("routers").replaceChildren(...sources.filter((source) => source.seen || source.own).map((source) => {
     const [state, icon, title, why] = status(source, now);
@@ -268,9 +299,52 @@ function renderRouters(now) {
       h("div", { class: "who" }, `${router?.client ?? "router"} · :${source.port}`),
       h("div", { class: "state" }, h("span", { class: "icon", "aria-hidden": "true" }, icon), title),
       h("div", { class: "why" }, why),
+      router && source.up && routingSwitch(source),
       router && h("div", { class: "meta" }, `→ ${router.upstream} · Jev model ${router.jevModel} · min confidence ${router.minConfidence} · up ${ago(now - Date.parse(router.startedAt))} · ${int(router.recorded)} requests logged`),
     );
   }));
+}
+
+function routingSwitch(source) {
+  const on = source.router.routing !== false;
+  const node = h("button", { type: "button", class: "switch" }, on ? "Switch routing off (measure a baseline)" : "Switch routing back on");
+  node.addEventListener("click", () => setRouting(source, !on));
+  return node;
+}
+
+const sum = (events, pick) => events.reduce((total, event) => total + (pick(event) ?? 0), 0);
+
+// Both columns cover everything that went through in that state — passthroughs included — because
+// that is what each way of working really costs. It only means something if the work is alike.
+function renderCompare(events) {
+  const metered = events.filter((event) => event.usage);
+  const groups = [["With Jev routing", metered.filter((event) => !baseline(event))], ["Baseline (routing off)", metered.filter(baseline)]];
+  const per = (group, pick) => (group.length ? sum(group, pick) / group.length : undefined);
+  const rows = [
+    ["LLM requests metered", (group) => group.length, int],
+    ["Input tokens / request", (group) => per(group, (event) => event.usage.input), int],
+    ["…of which cached", (group) => (sum(group, (event) => event.usage.input) ? (100 * sum(group, (event) => event.usage.cached)) / sum(group, (event) => event.usage.input) : undefined), (value) => Math.round(value) + "%"],
+    ["Output tokens / request", (group) => per(group, (event) => event.usage.output), int],
+    ["…of which reasoning", (group) => per(group, (event) => event.usage.reasoning), int],
+    ["Seconds / request", (group) => per(group, (event) => event.durationMs / 1000), (value) => value.toFixed(1)],
+    ["Total input tokens", (group) => sum(group, (event) => event.usage.input), int],
+    ["Total output tokens", (group) => sum(group, (event) => event.usage.output), int],
+  ];
+  const cell = (value, format) => (value === undefined || Number.isNaN(value) ? "–" : format(value));
+  $("compare").replaceChildren(
+    h("thead", {}, h("tr", {}, h("th", {}, ""), ...groups.map(([label]) => h("th", {}, label)), h("th", {}, "Difference"))),
+    h("tbody", {}, ...rows.map(([label, measure, format], index) => {
+      const [withJev, without] = groups.map(([, group]) => measure(group));
+      const comparable = index > 0 && index < 6 && withJev !== undefined && without;
+      const delta = comparable ? (100 * (withJev - without)) / without : undefined;
+      return h("tr", {}, h("td", {}, label), h("td", {}, cell(withJev, format)), h("td", {}, cell(without, format)),
+        h("td", { class: "delta" }, delta === undefined || !Number.isFinite(delta) ? "" : (delta > 0 ? "+" : "") + Math.round(delta) + "%"));
+    })),
+  );
+  const direct = events.filter((event) => event.mode === "direct").length;
+  $("compare-note").textContent = groups[1][1].length
+    ? `Per-request averages in the selected range${direct ? `; ${int(direct)} direct answer${direct === 1 ? "" : "s"} cost no LLM tokens at all and are not in the averages` : ""}. Only meaningful when both columns did similar work.`
+    : "No baseline yet. Switch routing off on a router card, do a comparable piece of work, then switch it back on: both columns fill in.";
 }
 
 function renderTiles(events) {
@@ -290,6 +364,8 @@ function renderTiles(events) {
     tile("Jev calls", int(asked.length + failures), failures ? `${int(failures)} failed` : "none failed"),
     tile("Jev latency", avgLatency === undefined ? "–" : int(avgLatency) + " ms", latencies.length ? `p95 ${int(latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * 0.95))])} ms` : "no calls yet"),
     tile("Jev confidence", avgConfidence === undefined ? "–" : avgConfidence.toFixed(2), "average of its tool picks"),
+    tile("LLM input tokens", int(sum(events, (event) => event.usage?.input)), `${pct(sum(events, (event) => event.usage?.cached), sum(events, (event) => event.usage?.input))} served from cache`),
+    tile("LLM output tokens", int(sum(events, (event) => event.usage?.output)), `${int(sum(events, (event) => event.usage?.reasoning))} of them reasoning`),
     tile("Jev input tokens", int(tokens), `≈ $${((tokens / 1e6) * JEV_USD_PER_MILLION_INPUT_TOKENS).toFixed(4)} at $${JEV_USD_PER_MILLION_INPUT_TOKENS}/M`),
   );
 }
@@ -367,9 +443,12 @@ function renderRows(events) {
       h("td", { class: "num" }, (event.confidence ?? event.jev?.confidence)?.toFixed(2) ?? "–"),
       h("td", { class: "reason-cell", title: event.reason }, event.reason ?? ""),
       h("td", { class: "num" }, event.status === undefined ? "–" : String(event.status)),
-      h("td", { class: "num" }, event.jev ? int(event.jev.latencyMs) : "–"));
+      h("td", { class: "num" }, event.jev ? int(event.jev.latencyMs) : "–"),
+      h("td", { class: "num", title: event.usage ? `${int(event.usage.cached)} cached, ${int(event.usage.cacheWrite)} written to cache` : undefined }, event.usage ? int(event.usage.input) : "–"),
+      h("td", { class: "num", title: event.usage ? `${int(event.usage.reasoning)} reasoning` : undefined }, event.usage ? int(event.usage.output) : "–"),
+      h("td", { class: "num" }, event.durationMs === undefined ? "–" : (event.durationMs / 1000).toFixed(1)));
   }));
-  $("note").textContent = `Newest first, up to ${MAX_ROWS}. Dimmed rows are from before the router's last restart; a tool in brackets is what Jev picked when the LLM still made the call.`;
+  $("note").textContent = `Newest first, up to ${MAX_ROWS}. Dimmed rows are from before the router's last restart; a tool in brackets is what Jev picked when the LLM still made the call. A request appears once its reply has finished, which is when the provider reports its tokens (hover In/Out for cache and reasoning).`;
 }
 
 function renderControls() {
@@ -396,11 +475,12 @@ function render() {
     .sort((a, b) => at(a) - at(b));
   // Rebuilding charts and rows under the pointer kills hover and text selection, so only do it
   // when they would actually differ (new data, another filter, or the time axis moving on).
-  const next = [view.client, view.range, events.length, events.at(-1)?.time, sources.map((source) => source.router?.client).join(), Math.floor(now / 30e3)].join("|");
+  const next = [view.client, view.range, events.length, events.at(-1)?.time, sources.map((source) => `${source.router?.client}${source.router?.routing}`).join(), Math.floor(now / 30e3)].join("|");
   if (next === signature) return;
   signature = next;
   renderControls();
   renderTiles(events);
+  renderCompare(events);
   renderShare(events);
   renderTimeline(events, now);
   renderReasons(events);

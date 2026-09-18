@@ -83,3 +83,6 @@ export const chat = (content: string, extra: Record<string, unknown> = {}) => ({
   tools,
   ...extra,
 });
+
+/** Requests are logged once their reply has been read to the end, in the background: let that finish. */
+export const settled = () => new Promise((resolve) => setTimeout(resolve, 5));

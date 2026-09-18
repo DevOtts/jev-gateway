@@ -14,7 +14,12 @@ const page = readFileSync(new URL("./dashboard.html", import.meta.url), "utf8");
  */
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
 
-export function dashboardRoutes(config: Config, events: EventLog) {
+export interface RoutingSwitch {
+  get(): boolean;
+  set(enabled: boolean): void;
+}
+
+export function dashboardRoutes(config: Config, events: EventLog, routing: RoutingSwitch) {
   const startedAt = new Date().toISOString();
   const routes = new Hono();
 
@@ -34,6 +39,7 @@ export function dashboardRoutes(config: Config, events: EventLog) {
         upstream: config.upstreamBaseUrl,
         jevModel: config.jevModel,
         minConfidence: config.minConfidence,
+        routing: routing.get(),
         // Sequence numbers restart with the process: a page that sees this change starts over.
         startedAt,
         now: new Date().toISOString(),
@@ -41,6 +47,21 @@ export function dashboardRoutes(config: Config, events: EventLog) {
       },
       events: events.since(Number.isFinite(since) ? since : 0),
     });
+  });
+
+  /**
+   * Turn Jev routing on or off without a restart, to compare token use with and without it. A
+   * bodyless POST needs no CORS preflight, so the origin is checked here instead: browsers always
+   * name the origin of a cross-site POST, and only this machine's own pages may flip the switch.
+   */
+  routes.post("/routing", (c) => {
+    const origin = c.req.header("origin");
+    if (origin && !LOCAL_ORIGIN.test(origin)) return c.json({ error: "local pages only" }, 403);
+    if (origin) c.header("access-control-allow-origin", origin);
+    const enabled = c.req.query("enabled");
+    if (enabled !== "true" && enabled !== "false") return c.json({ error: "enabled must be true or false" }, 400);
+    routing.set(enabled === "true");
+    return c.json({ routing: routing.get() });
   });
 
   return routes;

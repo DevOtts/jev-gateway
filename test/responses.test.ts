@@ -2,7 +2,7 @@ import { zstdCompressSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { NO_TOOL } from "../src/questions.js";
-import { fakeJev, fakeUpstream, testConfig } from "./helpers.js";
+import { fakeJev, fakeUpstream, settled, testConfig } from "./helpers.js";
 
 /** Shaped like what Codex sends: function + free-form + provider-run tools, item-based input. */
 const codexRequest = (extra: Record<string, unknown> = {}) => ({
@@ -242,6 +242,7 @@ describe("POST /v1/responses", () => {
     expect(upstream.calls[0]!.body.tool_choice).toEqual({ type: "custom", name: "exec" });
     // The declaration itself must reach upstream untouched.
     expect(upstream.calls[0]!.body.input[0]).toEqual(codexLiteRequest().input[0]);
+    await settled();
     expect(logged[0]).toMatchObject({ tools: 3, mode: "forced", tool: "exec" });
   });
 

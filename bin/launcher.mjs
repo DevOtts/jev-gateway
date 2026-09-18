@@ -43,6 +43,7 @@ export async function runLauncher(spec) {
   ${spec.name} --jev-logs      follow the router's decisions (run in a second terminal)
   ${spec.name} --jev-dashboard open the monitoring dashboard: is Jev routing, and if not, why?
   ${spec.name} --jev-stop      stop the background router
+  ${spec.name} --jev-routing on|off   baseline mode: off stops asking Jev but keeps metering tokens
   ${spec.name} --jev-config    how to point plain \`${spec.client}\` at the router permanently
 
 Environment (or ${ENV_FILES.at(-1)}):
@@ -150,6 +151,19 @@ Environment (or ${ENV_FILES.at(-1)}):
   const [flag] = process.argv.slice(2);
   if (flag === "--jev-help") return console.log(help);
   if (flag === "--jev-stop") return await stopRouter();
+  if (flag === "--jev-routing") {
+    const wanted = process.argv[3];
+    if (wanted !== "on" && wanted !== "off") return console.error(`usage: ${spec.name} --jev-routing on|off`);
+    await ensureRouter();
+    const key = process.env.ROUTER_API_KEY ? `&key=${encodeURIComponent(process.env.ROUTER_API_KEY)}` : "";
+    const response = await fetch(`${origin}/dashboard/routing?enabled=${wanted === "on"}${key}`, { method: "POST" });
+    if (!response.ok) return console.error(`${spec.name}: the router refused (${response.status}). Run \`${spec.name} --jev-stop\` and try again.`);
+    return console.log(
+      wanted === "on"
+        ? `${spec.name}: routing on — Jev decides again.`
+        : `${spec.name}: routing off — baseline mode: requests go straight to the LLM, tokens are still metered.`,
+    );
+  }
   if (flag === "--jev-config") return console.log(spec.configHelp(origin));
   if (flag === "--jev-start") {
     await ensureRouter();

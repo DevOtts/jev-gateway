@@ -17,6 +17,10 @@ export interface RouteEvent {
   confidence?: number;
   /** Upstream HTTP status; absent for `direct`, which never calls upstream. */
   status?: number;
+  /** How long the whole request took, reply included. */
+  durationMs?: number;
+  /** What the LLM call cost, as the provider reported it; absent for `direct` and failed calls. */
+  usage?: { input: number; output: number; cached: number; cacheWrite: number; reasoning: number };
   /** Present whenever Jev answered, even if the router then let the LLM decide. */
   jev?: { choice: string; confidence: number; latencyMs: number; inputTokens: number; shortlist?: string[] };
 }
@@ -40,6 +44,7 @@ function toEvent(entry: Record<string, unknown>, seq: number): RouteEvent | unde
   const mode = text(entry.mode);
   if (entry.event !== "route" || !mode) return undefined;
   const jev = entry.jev && typeof entry.jev === "object" ? (entry.jev as Record<string, unknown>) : undefined;
+  const usage = entry.usage && typeof entry.usage === "object" ? (entry.usage as Record<string, unknown>) : undefined;
   return {
     seq,
     time: text(entry.time) ?? new Date().toISOString(),
@@ -51,6 +56,14 @@ function toEvent(entry: Record<string, unknown>, seq: number): RouteEvent | unde
     tool: text(entry.tool),
     confidence: number(entry.confidence),
     status: number(entry.status),
+    durationMs: number(entry.durationMs),
+    usage: usage && {
+      input: number(usage.input) ?? 0,
+      output: number(usage.output) ?? 0,
+      cached: number(usage.cached) ?? 0,
+      cacheWrite: number(usage.cacheWrite) ?? 0,
+      reasoning: number(usage.reasoning) ?? 0,
+    },
     jev: jev && {
       choice: text(jev.choice) ?? "",
       confidence: number(jev.confidence) ?? 0,

@@ -152,13 +152,33 @@ starts the router if needed and opens `http://localhost:8790/dashboard` (`8789` 
 requests per mode, the passthrough reasons explained, Jev's latency / confidence / token spend, a
 timeline and a live table of recent requests.
 
+### Tokens, and a baseline to compare against
+
+Every forwarded request is logged once its reply has ended, with what the provider says it cost:
+input tokens (and how many came from the prompt cache), output tokens (and how many were hidden
+reasoning) and duration — read from a clone of the reply, so the client is never delayed. `direct`
+answers cost no LLM tokens; Jev's own input tokens are counted separately.
+
+To see what the same work costs **without** Jev, switch routing off: the gateway keeps proxying and
+metering, but never asks Jev and rewrites nothing.
+
+```bash
+jev-codex --jev-routing off    # baseline: straight to the LLM, still metered
+jev-codex --jev-routing on     # Jev decides again
+```
+
+The same switch is a button on each router card, and `JEV_ROUTING=off` starts a router that way.
+The dashboard puts both states side by side — tokens in/out per request, cache share, reasoning,
+seconds. It compares whatever ran in each state, so do comparable work in both.
+
 `jev-codex` and `jev-claude` each run their own router, and one page shows both: the dashboard of
 either polls the other's `GET /dashboard/events` (readable across ports by pages served from
 localhost only; `?peers=8795,8796` adds routers on non-default ports). A router keeps its last
 1,000 route events in memory and, under a launcher, replays its `~/.jev-gateway/<client>.log` at
 startup, so history survives a restart (`JEV_LOG_FILE` does the same for a standalone server whose
 stdout you append to a file). Only what the log line already holds is ever exposed — time, path,
-model, tool count, mode, reason, tool name, confidence, Jev latency and tokens, upstream status —
+model, tool count, mode, reason, tool name, confidence, Jev latency and tokens, upstream status,
+LLM token counts and duration —
 never prompts, tool arguments or credentials. With `ROUTER_API_KEY` set the dashboard is behind it
 too: open `/dashboard?key=…`.
 
@@ -195,6 +215,7 @@ src/state.ts       conversation → Jev state (truncation, newest-turns budget)
 src/questions.ts   tools → Jev questions; detects closed-set parameters
 src/decide.ts      the Jev call and the mode decision
 src/upstream.ts    streaming reverse proxy
+src/usage.ts       token usage read from a reply, in one vocabulary across providers
 src/app.ts         Hono app: routes, auth, headers, fail-open replay
 src/events.ts      in-memory ring of route events (metadata only), replayed from the log on startup
 src/dashboard.ts   GET /dashboard and /dashboard/events; dashboard.html is the whole page, no build step

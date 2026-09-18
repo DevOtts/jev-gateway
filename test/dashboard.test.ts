@@ -6,7 +6,7 @@ import { createApp } from "../src/app.js";
 import type { AskJev } from "../src/decide.js";
 import { createEventLog, type RouteEvent } from "../src/events.js";
 import { NO_TOOL } from "../src/questions.js";
-import { chat, fakeJev, fakeUpstream, testConfig } from "./helpers.js";
+import { chat, fakeJev, fakeUpstream, testConfig, settled } from "./helpers.js";
 
 type Feed = { router: Record<string, unknown>; events: RouteEvent[] };
 
@@ -29,7 +29,10 @@ function setup(askJev: AskJev, config = testConfig()) {
       headers: { "content-type": "application/json", authorization: "Bearer sk-client-credential" },
       body: JSON.stringify(body),
     });
-  const feed = async (query = "") => (await (await app.request(`/dashboard/events${query}`)).json()) as Feed;
+  const feed = async (query = "") => {
+    await settled();
+    return (await (await app.request(`/dashboard/events${query}`)).json()) as Feed;
+  };
   return { app, post, feed };
 }
 

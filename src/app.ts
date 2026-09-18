@@ -11,6 +11,7 @@ import { redactHeaders, summarizeResponse, type Dump } from "./debug.js";
 import { decide, type AskJev, type Decision } from "./decide.js";
 import { createEventLog, type EventLog } from "./events.js";
 import { forward } from "./upstream.js";
+import { readUsage } from "./usage.js";
 
 export interface Deps {
   config: Config;
@@ -74,6 +75,21 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
   };
 
   /**
+   * Log a forwarded request once its reply has ended, because that is when the provider says what
+   * it cost. The reply is read from a clone in the background, so the client is never delayed.
+   */
+  const logWhenDone = (entry: Record<string, unknown>, response: Response, startedAt: number) => {
+    const copy = response.clone();
+    void readUsage(copy).then((usage) =>
+      log({ ...entry, status: response.status, durationMs: Math.round(performance.now() - startedAt), ...(usage ? { usage } : {}) }),
+    );
+  };
+
+  // Routing can be switched off at runtime to measure a baseline: same clients, same traffic,
+  // same token accounting, but Jev is never asked and nothing is rewritten.
+  let routing = config.routing;
+
+  /**
    * Error bodies are the only documentation an undocumented backend offers, and a finished
    * stream's usage is the only way to see what a rewrite did to the prompt cache: keep both.
    * Reads a clone in the background, so the client's stream is never delayed.
@@ -105,6 +121,8 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
   };
 
   const route = <Req extends AnyRequest>(adapter: Adapter<Req>) => async (c: Context) => {
+    const startedAt = performance.now();
+    const time = new Date().toISOString();
     const bytes = new Uint8Array(await c.req.arrayBuffer());
     // Unreadable bodies are not ours to judge: upstream produces its own error for them.
     const req = parseBody<Req>(bytes, c.req.header("content-encoding"));
@@ -119,9 +137,10 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     let tools: number | undefined;
     if (!req) decision = { mode: "passthrough", reason: "unparseable_body" };
     else if (c.req.header("x-jev-gateway") === "off") decision = { mode: "passthrough", reason: "disabled_by_header" };
+    else if (!routing) decision = { mode: "passthrough", reason: "routing_disabled" };
     else ({ decision, tools } = await decideFor(adapter, req));
 
-    const entry = { event: "route", path: c.req.path, model: req?.model, tools: tools ?? req?.tools?.length ?? 0 };
+    const entry = { event: "route", time, path: c.req.path, model: req?.model, tools: tools ?? req?.tools?.length ?? 0 };
     if (req && decision.mode === "direct") {
       log({ ...entry, ...decision });
       const call = { tool: decision.tool, args: decision.args, inputTokens: decision.jev?.inputTokens ?? 0 };
@@ -142,7 +161,7 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
       const sent = { mode: decision.mode, model: rewritten.model, tool_choice: (rewritten as { tool_choice?: unknown }).tool_choice };
       dumpResponse("rejected", response, { sent });
       if (response.status !== 400 && response.status !== 422) {
-        log({ ...entry, ...decision, status: response.status });
+        logWhenDone({ ...entry, ...decision }, response, startedAt);
         return response;
       }
       // The upstream refused the rewritten request (some backends only accept tool_choice
@@ -155,7 +174,7 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
       body: bytes,
       responseHeaders: decisionHeaders(decision),
     });
-    log({ ...entry, ...decision, status: response.status });
+    logWhenDone({ ...entry, ...decision }, response, startedAt);
     dumpResponse("upstream-error", response);
     return response;
   };
@@ -193,7 +212,10 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     return c.json((await decideFor(adapter, req)).decision);
   });
 
-  app.route("/dashboard", dashboardRoutes(config, events));
+  app.route(
+    "/dashboard",
+    dashboardRoutes(config, events, { get: () => routing, set: (enabled) => void (routing = enabled) }),
+  );
 
   app.post("/v1/chat/completions", route(chatAdapter));
   app.post("/v1/responses", route(responsesAdapter));

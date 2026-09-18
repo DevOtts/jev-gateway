@@ -18,6 +18,8 @@ export interface Config {
   argMinCertainty: number;
   onNone: "force_none" | "passthrough";
   directCalls: boolean;
+  /** False starts the gateway as a plain metering proxy; the dashboard can flip it at runtime. */
+  routing: boolean;
   maxStateChars: number;
   maxMessageChars: number;
   /** Opt-in: dump every routed request (decoded body, redacted headers) into this directory. */
@@ -46,7 +48,7 @@ const num = (env: Env, key: string, fallback: number): number => {
 const bool = (env: Env, key: string, fallback: boolean): boolean => {
   const raw = str(env, key)?.toLowerCase();
   if (raw === undefined) return fallback;
-  return raw === "1" || raw === "true" || raw === "yes";
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 };
 
 export function loadConfig(env: Env = process.env): Config {
@@ -67,6 +69,7 @@ export function loadConfig(env: Env = process.env): Config {
     argMinCertainty: num(env, "JEV_ARG_MIN_CERTAINTY", 0.8),
     onNone,
     directCalls: bool(env, "JEV_DIRECT_CALLS", true),
+    routing: bool(env, "JEV_ROUTING", true),
     maxStateChars: num(env, "JEV_MAX_STATE_CHARS", 60_000),
     maxMessageChars: num(env, "JEV_MAX_MESSAGE_CHARS", 4_000),
     debugDumpDir: str(env, "JEV_DEBUG_DUMP_DIR"),
