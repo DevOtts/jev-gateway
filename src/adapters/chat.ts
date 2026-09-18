@@ -104,14 +104,14 @@ function directJson(req: ChatRequest, call: DirectCall) {
       },
     ],
     usage: usageOf(call),
-    system_fingerprint: "jev-router",
+    system_fingerprint: "jev-gateway",
   };
 }
 
 /** The same tool call as a chat.completion.chunk stream, for `stream: true` clients. */
 function directStream(req: ChatRequest, call: DirectCall): string {
   const { id, callId, created } = ids();
-  const base = { id, object: "chat.completion.chunk", created, model: req.model, system_fingerprint: "jev-router" };
+  const base = { id, object: "chat.completion.chunk", created, model: req.model, system_fingerprint: "jev-gateway" };
   const delta = (delta: object, finish_reason: string | null = null) => ({
     ...base,
     choices: [{ index: 0, delta, logprobs: null, finish_reason }],

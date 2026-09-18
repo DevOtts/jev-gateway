@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// jev-claude: run Claude Code through a local jev-router — nothing in ~/.claude is modified.
+// jev-claude: run Claude Code through a local jev-gateway — nothing in ~/.claude is modified.
 import { runLauncher } from "./launcher.mjs";
 
 await runLauncher({

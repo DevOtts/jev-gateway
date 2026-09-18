@@ -7,7 +7,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const STATE_DIR = join(homedir(), ".jev-router");
+const STATE_DIR = join(homedir(), ".jev-gateway");
+// A git checkout runs the TypeScript sources directly; an installed package only ships dist/.
+const FROM_SOURCE = existsSync(join(ROOT, "src/index.ts"));
+const ROUTER_ARGS = FROM_SOURCE ? ["--import", "tsx", join(ROOT, "src/index.ts")] : [join(ROOT, "dist/index.js")];
+/** Where TYPESAFE_API_KEY and tuning knobs may live; the first file to set a variable wins. */
+const ENV_FILES = [...(FROM_SOURCE ? [join(ROOT, ".env")] : []), join(STATE_DIR, ".env")];
 
 /**
  * @param {object} spec
@@ -22,8 +27,8 @@ const STATE_DIR = join(homedir(), ".jev-router");
  * @param {(origin: string) => string} spec.configHelp  how to wire the client up permanently
  */
 export async function runLauncher(spec) {
-  // The repo's .env supplies TYPESAFE_API_KEY and tuning knobs; real env vars win over it.
-  if (existsSync(join(ROOT, ".env"))) process.loadEnvFile(join(ROOT, ".env"));
+  // Real environment variables win over both files.
+  for (const file of ENV_FILES) if (existsSync(file)) process.loadEnvFile(file);
 
   const port = Number(process.env[spec.portEnv] ?? spec.defaultPort);
   const origin = `http://127.0.0.1:${port}`;
@@ -39,7 +44,7 @@ export async function runLauncher(spec) {
   ${spec.name} --jev-stop      stop the background router
   ${spec.name} --jev-config    how to point plain \`${spec.client}\` at the router permanently
 
-Environment (or ${join(ROOT, ".env")}):
+Environment (or ${ENV_FILES.at(-1)}):
   TYPESAFE_API_KEY   required — Jev makes the tool-selection call
   ${spec.portEnv}   router port for ${spec.client} (default ${spec.defaultPort})
   ${spec.upstreamHelp}
@@ -67,7 +72,7 @@ Environment (or ${join(ROOT, ".env")}):
       process.exit(1);
     }
     if (!process.env.TYPESAFE_API_KEY) {
-      console.error(`${spec.name}: TYPESAFE_API_KEY is not set. Export it, or put it in ${join(ROOT, ".env")}`);
+      console.error(`${spec.name}: TYPESAFE_API_KEY is not set. Export it, or put it in ${ENV_FILES.at(-1)}`);
       process.exit(1);
     }
 
@@ -75,7 +80,7 @@ Environment (or ${join(ROOT, ".env")}):
     const log = openSync(logFile, "a");
     // The client authenticates itself (subscription login or its own key); the gateway must not swap that out.
     const { UPSTREAM_API_KEY: _key, ROUTER_API_KEY: _routerKey, ...env } = process.env;
-    const child = spawn(process.execPath, ["--import", "tsx", join(ROOT, "src/index.ts")], {
+    const child = spawn(process.execPath, ROUTER_ARGS, {
       cwd: ROOT,
       env: { ...env, PORT: String(port), UPSTREAM_BASE_URL: upstream },
       detached: true,

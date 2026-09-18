@@ -1,34 +1,52 @@
 {
-  "name": "jev-router",
+  "name": "jev-gateway",
   "version": "0.1.0",
-  "description": "OpenAI-compatible LLM gateway that routes tool-selection decisions to TypeSafe's Jev (System One) model",
+  "description": "LLM gateway that hands tool-selection decisions to TypeSafe's Jev model \u2014 with launchers for Codex and Claude Code",
+  "keywords": [
+    "llm",
+    "gateway",
+    "proxy",
+    "jev",
+    "typesafe",
+    "tool-calling",
+    "codex",
+    "claude-code",
+    "openai",
+    "anthropic"
+  ],
   "type": "module",
-  "private": true,
   "engines": {
     "node": ">=22.9"
-  },
-  "scripts": {
-    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
-    "start": "node --env-file-if-exists=.env dist/index.js",
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "codex": "node bin/jev-codex.mjs",
-    "claude": "node bin/jev-claude.mjs"
-  },
-  "dependencies": {
-    "@hono/node-server": "^2.1.1",
-    "@typesafe-ai/sdk": "^0.6.0",
-    "hono": "^4.13.8",
-    "tsx": "^4.23.13"
-  },
-  "devDependencies": {
-    "@types/node": "^22.20.3",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
   },
   "bin": {
     "jev-codex": "bin/jev-codex.mjs",
     "jev-claude": "bin/jev-claude.mjs"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "scripts/mock-jev.mjs",
+    ".env.example"
+  ],
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "codex": "node bin/jev-codex.mjs",
+    "claude": "node bin/jev-claude.mjs",
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.1",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "hono": "^4.13.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1",
+    "tsx": "^4.23.13"
   }
 }

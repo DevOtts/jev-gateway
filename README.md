@@ -1,4 +1,7 @@
-# jev-router
+# jev-gateway
+
+> Independent project — not affiliated with or endorsed by TypeSafe. "Jev" is TypeSafe's model; this
+> gateway is a client of its public API.
 
 An LLM gateway that speaks Chat Completions, the Responses API and the Anthropic Messages API.
 Point your client — or Codex, or Claude Code — at it instead of your LLM provider; whenever a
@@ -28,7 +31,7 @@ Jev call. The conversation becomes the state; the questions are:
   argument (and "was it stated?" for optional ones), asked speculatively since extra questions are
   nearly free
 
-The answer picks one of five modes, reported in the `x-jev-router-mode` response header:
+The answer picks one of five modes, reported in the `x-jev-gateway-mode` response header:
 
 | Mode | When | What happens |
 | --- | --- | --- |
@@ -36,7 +39,7 @@ The answer picks one of five modes, reported in the `x-jev-router-mode` response
 | `forced` | Tool is confident, arguments need an LLM | Forwarded with `tool_choice` set to that function — and to `ARGS_MODEL` if configured, since the hard part is already done |
 | `hint` | Tool is confident, but `tool_choice` can't be rewritten (Anthropic: extended thinking on, or the conversation is prompt-cached) | Forwarded with a one-line suggestion appended *after* the client's last block, so cached prefixes stay intact. The LLM may disagree |
 | `none` | Jev is confident no tool is needed | Forwarded with `tool_choice: "none"` (or untouched with `JEV_ON_NONE=passthrough`) |
-| `passthrough` | Low confidence, the two questions disagree, Jev errored/timed out, no tools, caller already chose | Forwarded byte-for-byte; `x-jev-router-reason` says why |
+| `passthrough` | Low confidence, the two questions disagree, Jev errored/timed out, no tools, caller already chose | Forwarded byte-for-byte; `x-jev-gateway-reason` says why |
 
 Rosters over 120 tools (Claude Code sends ~280) don't fit one good question, so they take two Jev
 calls: every shard of the roster is ranked in one call, and the top 3 of each go on to the decision
@@ -44,6 +47,17 @@ above with full-length descriptions.
 
 The router always **fails open**: any Jev problem means the LLM decides, as if the gateway weren't
 there. All other `/v1/*` routes (models, embeddings, …) are proxied unchanged.
+
+## Install
+
+```bash
+npm install -g jev-gateway
+mkdir -p ~/.jev-gateway && echo "TYPESAFE_API_KEY=…" > ~/.jev-gateway/.env
+jev-codex        # or: jev-claude
+```
+
+That is all the two launchers need (details below). To run the gateway as a standalone server for
+your own clients, work from a checkout:
 
 ## Run it
 
@@ -79,7 +93,7 @@ curl -s localhost:8787/router/decide -H 'content-type: application/json' -d '{
 }'
 ```
 
-Send `x-jev-router: off` on any request to bypass Jev for that call.
+Send `x-jev-gateway: off` on any request to bypass Jev for that call.
 
 ## Use it with Codex (local)
 
@@ -88,19 +102,18 @@ chat completions — including Codex's free-form tools (`apply_patch`), provider
 (`web_search`, offered to Jev but never forced) and zstd-compressed request bodies.
 
 ```bash
-npm link                 # once, puts `jev-codex` on your PATH (or use `pnpm codex -- …`)
 jev-codex                # instead of `codex`; every codex argument still works
 jev-codex exec "fix the failing test"
 jev-codex --jev-logs     # second terminal: watch each routing decision live
 ```
 
 `jev-codex` starts a background router on `127.0.0.1:8790` if one isn't running, then launches
-`codex` with a `-c model_providers.jev-router…` override. **Nothing in `~/.codex` is modified**, and
+`codex` with a `-c model_providers.jev-gateway…` override. **Nothing in `~/.codex` is modified**, and
 plain `codex` keeps working as before. It reuses your existing Codex login
 (`requires_openai_auth = true`): with a ChatGPT subscription the router forwards to
 `https://chatgpt.com/backend-api/codex`, with an API key to `https://api.openai.com/v1`
-(override with `JEV_CODEX_UPSTREAM_BASE_URL`). `TYPESAFE_API_KEY` is read from the environment or
-this repo's `.env`. `jev-codex --jev-help` lists the rest (`--jev-status`, `--jev-stop`,
+(override with `JEV_CODEX_UPSTREAM_BASE_URL`). `TYPESAFE_API_KEY` is read from the environment,
+`~/.jev-gateway/.env`, or a checkout's own `.env`. `jev-codex --jev-help` lists the rest (`--jev-status`, `--jev-stop`,
 `--jev-config` for a permanent `codex --profile jev`).
 
 If the upstream rejects a rewritten request (HTTP 400/422 — some backends only accept
@@ -109,7 +122,6 @@ If the upstream rejects a rewritten request (HTTP 400/422 — some backends only
 ## Use it with Claude Code (local)
 
 ```bash
-npm link                 # once, puts `jev-claude` (and `jev-codex`) on your PATH
 jev-claude               # instead of `claude`; every claude argument still works
 jev-claude -p "summarise this repo"
 jev-claude --jev-logs    # second terminal: watch each routing decision live

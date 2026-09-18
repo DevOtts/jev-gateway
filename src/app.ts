@@ -48,14 +48,14 @@ function parseBody<Req>(bytes: Uint8Array, encoding: string | undefined): Req | 
 }
 
 function decisionHeaders(decision: Decision): Record<string, string> {
-  const headers: Record<string, string> = { "x-jev-router-mode": decision.mode };
-  if (decision.mode === "passthrough") headers["x-jev-router-reason"] = decision.reason.slice(0, 120);
+  const headers: Record<string, string> = { "x-jev-gateway-mode": decision.mode };
+  if (decision.mode === "passthrough") headers["x-jev-gateway-reason"] = decision.reason.slice(0, 120);
   if (decision.mode === "forced" || decision.mode === "direct" || decision.mode === "hint") {
-    headers["x-jev-router-tool"] = decision.tool;
+    headers["x-jev-gateway-tool"] = decision.tool;
   }
   if (decision.jev) {
-    headers["x-jev-router-confidence"] = decision.jev.confidence.toFixed(3);
-    headers["x-jev-router-latency-ms"] = String(decision.jev.latencyMs);
+    headers["x-jev-gateway-confidence"] = decision.jev.confidence.toFixed(3);
+    headers["x-jev-gateway-latency-ms"] = String(decision.jev.latencyMs);
   }
   return headers;
 }
@@ -108,7 +108,7 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () =
     let decision: Decision;
     let tools: number | undefined;
     if (!req) decision = { mode: "passthrough", reason: "unparseable_body" };
-    else if (c.req.header("x-jev-router") === "off") decision = { mode: "passthrough", reason: "disabled_by_header" };
+    else if (c.req.header("x-jev-gateway") === "off") decision = { mode: "passthrough", reason: "disabled_by_header" };
     else ({ decision, tools } = await decideFor(adapter, req));
 
     const entry = { event: "route", path: c.req.path, model: req?.model, tools: tools ?? req?.tools?.length ?? 0 };
@@ -156,7 +156,7 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () =
     if (!config.routerApiKey) return next();
     const presented = c.req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
     if (safeEqual(presented, config.routerApiKey)) return next();
-    return c.json({ error: { message: "Invalid jev-router API key", type: "invalid_api_key" } }, 401);
+    return c.json({ error: { message: "Invalid jev-gateway API key", type: "invalid_api_key" } }, 401);
   });
 
   /**

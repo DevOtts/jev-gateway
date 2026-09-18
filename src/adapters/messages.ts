@@ -146,7 +146,7 @@ function build(req: MessagesRequest, call: DirectCall) {
     id: `msg_jev_${hex(12)}`,
     type: "message",
     role: "assistant",
-    model: req.model ?? "jev-router",
+    model: req.model ?? "jev-gateway",
     content: [block],
     stop_reason: "tool_use",
     stop_sequence: null,

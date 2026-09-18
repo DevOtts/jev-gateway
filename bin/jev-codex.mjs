@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// jev-codex: run Codex through a local jev-router — nothing in ~/.codex is modified.
+// jev-codex: run Codex through a local jev-gateway — nothing in ~/.codex is modified.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -21,7 +21,7 @@ function detectUpstream() {
 }
 
 const provider = (origin) => ({
-  name: `"jev-router"`,
+  name: `"jev-gateway"`,
   base_url: `"${origin}/v1"`,
   wire_api: `"responses"`,
   // Reuse whatever login Codex already has; the router forwards it upstream untouched.
@@ -40,13 +40,13 @@ await runLauncher({
     "                                API key       → https://api.openai.com/v1",
   args: (origin) => [
     "-c",
-    `model_provider="jev-router"`,
-    ...Object.entries(provider(origin)).flatMap(([key, value]) => ["-c", `model_providers.jev-router.${key}=${value}`]),
+    `model_provider="jev-gateway"`,
+    ...Object.entries(provider(origin)).flatMap(([key, value]) => ["-c", `model_providers.jev-gateway.${key}=${value}`]),
   ],
   configHelp: (origin) =>
     `# Save as ~/.codex/jev.config.toml, keep the router running (jev-codex --jev-start),\n` +
     `# then use: codex --profile jev\n` +
-    `model_provider = "jev-router"\n\n[model_providers.jev-router]\n` +
+    `model_provider = "jev-gateway"\n\n[model_providers.jev-gateway]\n` +
     Object.entries(provider(origin))
       .map(([key, value]) => `${key} = ${value}`)
       .join("\n"),

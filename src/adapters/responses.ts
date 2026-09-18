@@ -180,7 +180,7 @@ function build(req: ResponsesRequest, call: DirectCall) {
     error: null,
     incomplete_details: null,
     instructions: null,
-    model: req.model ?? "jev-router",
+    model: req.model ?? "jev-gateway",
     output: [item],
     parallel_tool_calls: req.parallel_tool_calls ?? true,
     previous_response_id: null,

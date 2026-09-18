@@ -70,7 +70,7 @@ describe("POST /v1/chat/completions", () => {
     const json = (await res.json()) as any;
 
     expect(upstream.calls).toHaveLength(0);
-    expect(res.headers.get("x-jev-router-mode")).toBe("direct");
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("direct");
     expect(json.choices[0].finish_reason).toBe("tool_calls");
     const call = json.choices[0].message.tool_calls[0];
     expect(call.function.name).toBe("set_lights");
@@ -108,7 +108,7 @@ describe("POST /v1/chat/completions", () => {
     );
     const res = await post(chat("weather in Lisbon?"));
 
-    expect(res.headers.get("x-jev-router-mode")).toBe("forced");
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("forced");
     expect(upstream.calls).toHaveLength(1);
     expect(upstream.calls[0]!.url).toBe("https://llm.test/v1/chat/completions");
     expect(upstream.calls[0]!.body.tool_choice).toEqual({ type: "function", function: { name: "get_weather" } });
@@ -119,14 +119,14 @@ describe("POST /v1/chat/completions", () => {
   it("falls back to forcing the tool when an argument is uncertain", async () => {
     const { post, upstream } = setup({ ...lightsAnswers, "arg:1:room": { choice: "office", confidence: 0.4 } });
     const res = await post(chat("lights on"));
-    expect(res.headers.get("x-jev-router-mode")).toBe("forced");
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("forced");
     expect(upstream.calls[0]!.body.tool_choice.function.name).toBe("set_lights");
   });
 
   it("sets tool_choice none when Jev is confident no tool is needed", async () => {
     const { post, upstream } = setup({ ...lightsAnswers, tool: { choice: NO_TOOL }, needs_tool: { noul: 0.05 } });
     const res = await post(chat("thanks, that's all!"));
-    expect(res.headers.get("x-jev-router-mode")).toBe("none");
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("none");
     expect(upstream.calls[0]!.body.tool_choice).toBe("none");
   });
 
@@ -144,8 +144,8 @@ describe("POST /v1/chat/completions", () => {
     const { post, upstream } = setup(canned);
     const body = chat("hmm");
     const res = await post(body);
-    expect(res.headers.get("x-jev-router-mode")).toBe("passthrough");
-    expect(res.headers.get("x-jev-router-reason")).toBe(reason);
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("passthrough");
+    expect(res.headers.get("x-jev-gateway-reason")).toBe(reason);
     expect(upstream.calls[0]!.body).toEqual(body);
   });
 
@@ -158,20 +158,20 @@ describe("POST /v1/chat/completions", () => {
     });
     const res = await app.request("/v1/chat/completions", { method: "POST", body: JSON.stringify(chat("hi")) });
     expect(res.status).toBe(200);
-    expect(res.headers.get("x-jev-router-reason")).toContain("jev_error");
+    expect(res.headers.get("x-jev-gateway-reason")).toContain("jev_error");
     expect(upstream.calls).toHaveLength(1);
   });
 
   it.each([
     ["there are no tools", { model: "m", messages: [{ role: "user", content: "hi" }] }, {}],
     ["the caller already chose a tool", chat("hi", { tool_choice: "none" }), {}],
-    ["the caller opts out", chat("hi"), { "x-jev-router": "off" }],
+    ["the caller opts out", chat("hi"), { "x-jev-gateway": "off" }],
   ])("never consults Jev when %s", async (_name, body, headers) => {
     const { post, jev, upstream } = setup(lightsAnswers);
     const res = await post(body, headers);
     expect(jev.requests).toHaveLength(0);
-    expect(res.headers.get("x-jev-router-mode")).toBe("passthrough");
-    expect(upstream.calls[0]!.headers.has("x-jev-router")).toBe(false);
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("passthrough");
+    expect(upstream.calls[0]!.headers.has("x-jev-gateway")).toBe(false);
   });
 });
 

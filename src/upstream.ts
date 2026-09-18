@@ -70,7 +70,7 @@ export async function forward(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return Response.json(
-      { error: { message: `jev-router could not reach upstream: ${message}`, type: "upstream_unreachable" } },
+      { error: { message: `jev-gateway could not reach upstream: ${message}`, type: "upstream_unreachable" } },
       { status: 502, headers: options.responseHeaders },
     );
   }

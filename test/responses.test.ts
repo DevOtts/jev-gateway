@@ -153,7 +153,7 @@ describe("POST /v1/responses", () => {
   it("leaves provider-run tools to the LLM", async () => {
     const { post, upstream } = setup({ tool: { choice: "web_search" }, needs_tool: { noul: 0.9 } });
     const res = await post(JSON.stringify(codexRequest()));
-    expect(res.headers.get("x-jev-router-reason")).toBe("hosted_tool_selected");
+    expect(res.headers.get("x-jev-gateway-reason")).toBe("hosted_tool_selected");
     expect(upstream.calls[0]!.body.tool_choice).toBe("auto");
   });
 
@@ -198,7 +198,7 @@ describe("POST /v1/responses", () => {
     });
 
     expect(jev.requests).toHaveLength(1);
-    expect(res.headers.get("x-jev-router-reason")).toBe("low_confidence");
+    expect(res.headers.get("x-jev-gateway-reason")).toBe("low_confidence");
     expect(Buffer.from(seen[0]!.body as Uint8Array).equals(compressed)).toBe(true);
     expect(seen[0]!.encoding).toBe("zstd");
   });
@@ -213,7 +213,7 @@ describe("POST /v1/responses", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ id: "resp_ok" });
-    expect(res.headers.get("x-jev-router-reason")).toBe("upstream_rejected_forced");
+    expect(res.headers.get("x-jev-gateway-reason")).toBe("upstream_rejected_forced");
     expect(upstream.calls.map((call) => call.body.tool_choice)).toEqual([{ type: "function", name: "shell" }, "auto"]);
   });
 
@@ -249,7 +249,7 @@ describe("POST /v1/responses", () => {
     // ChatGPT's backend answers 400 to both `tool_choice.namespace` and the bare name.
     const { post, upstream } = setup({ tool: { choice: "clock.sleep" }, needs_tool: { noul: 0.9 } });
     const res = await post(JSON.stringify(codexLiteRequest()));
-    expect(res.headers.get("x-jev-router-reason")).toBe("namespaced_tool_selected");
+    expect(res.headers.get("x-jev-gateway-reason")).toBe("namespaced_tool_selected");
     expect(upstream.calls).toHaveLength(1);
     expect(upstream.calls[0]!.body.tool_choice).toBe("auto");
   });
@@ -258,6 +258,6 @@ describe("POST /v1/responses", () => {
     const { post, jev } = setup({});
     const res = await post(JSON.stringify(codexRequest({ previous_response_id: "resp_123" })));
     expect(jev.requests).toHaveLength(0);
-    expect(res.headers.get("x-jev-router-reason")).toBe("previous_response_id");
+    expect(res.headers.get("x-jev-gateway-reason")).toBe("previous_response_id");
   });
 });

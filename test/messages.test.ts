@@ -76,7 +76,7 @@ describe("POST /v1/messages", () => {
     const { post, upstream } = setup(bash);
     const res = await post(claudeRequest({ tool_choice: { type: "auto", disable_parallel_tool_use: true } }));
 
-    expect(res.headers.get("x-jev-router-mode")).toBe("forced");
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("forced");
     const call = upstream.calls[0]!;
     expect(call.url).toBe("https://llm.test/v1/messages?beta=true");
     expect(call.body.tool_choice).toEqual({ type: "tool", name: "Bash", disable_parallel_tool_use: true });
@@ -92,8 +92,8 @@ describe("POST /v1/messages", () => {
     const body = claudeRequest(extra);
     const res = await post(body);
 
-    expect(res.headers.get("x-jev-router-mode")).toBe("hint");
-    expect(res.headers.get("x-jev-router-tool")).toBe("Bash");
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("hint");
+    expect(res.headers.get("x-jev-gateway-tool")).toBe("Bash");
     const sent = upstream.calls[0]!.body;
     expect(sent.tool_choice).toBeUndefined();
     expect(sent.messages.slice(0, -1)).toEqual(body.messages.slice(0, -1));
@@ -106,7 +106,7 @@ describe("POST /v1/messages", () => {
     const { post, upstream } = setup({ tool: { choice: NO_TOOL }, needs_tool: { noul: 0.05 } });
     const body = claudeRequest(asClaudeCode);
     const res = await post(body);
-    expect(res.headers.get("x-jev-router-reason")).toBe("no_tool_needed");
+    expect(res.headers.get("x-jev-gateway-reason")).toBe("no_tool_needed");
     expect(upstream.calls[0]!.body).toEqual(body);
   });
 
@@ -131,8 +131,8 @@ describe("POST /v1/messages", () => {
     expect(Object.keys(jev.requests[0]!.questions)).toEqual(["shard:0", "shard:1", "shard:2"]);
     const final = jev.requests[1]!.questions.tool!;
     expect(final.type === "choice" && Object.keys(final.criteria)).toEqual(["tool_7", "tool_200", NO_TOOL]);
-    expect(res.headers.get("x-jev-router-mode")).toBe("hint");
-    expect(res.headers.get("x-jev-router-tool")).toBe("tool_200");
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("hint");
+    expect(res.headers.get("x-jev-gateway-tool")).toBe("tool_200");
   });
 
   it("streams a complete tool_use itself when the tool takes no open-ended input", async () => {

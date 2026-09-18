@@ -21,5 +21,5 @@ const app = createApp({
 });
 
 serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
-  console.log(`jev-router listening on http://localhost:${port} → ${config.upstreamBaseUrl} (jev: ${config.jevModel})`);
+  console.log(`jev-gateway listening on http://localhost:${port} → ${config.upstreamBaseUrl} (jev: ${config.jevModel})`);
 });
