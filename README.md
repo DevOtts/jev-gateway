@@ -113,7 +113,7 @@ plain `codex` keeps working as before. It reuses your existing Codex login
 (`requires_openai_auth = true`): with a ChatGPT subscription the router forwards to
 `https://chatgpt.com/backend-api/codex`, with an API key to `https://api.openai.com/v1`
 (override with `JEV_CODEX_UPSTREAM_BASE_URL`). `TYPESAFE_API_KEY` is read from the environment,
-`~/.jev-gateway/.env`, or a checkout's own `.env`. `jev-codex --jev-help` lists the rest (`--jev-status`, `--jev-stop`,
+`~/.jev-gateway/.env`, or a checkout's own `.env`. `jev-codex --jev-help` lists the rest (`--jev-dashboard`, `--jev-status`, `--jev-stop`,
 `--jev-config` for a permanent `codex --profile jev`).
 
 If the upstream rejects a rewritten request (HTTP 400/422 — some backends only accept
@@ -137,6 +137,30 @@ Claude Code runs with adaptive thinking (a forced `tool_choice` is rejected) and
 conversation every turn (any `tool_choice` change would invalidate it). So Claude Code requests are
 steered with `hint` mode, `none` is never applied, and `direct` still answers without the LLM when
 a tool's arguments are all closed-set. API callers without thinking or message caching get `forced`.
+
+## Dashboard
+
+Is the gateway actually routing, or just passing traffic through — and if so, why?
+
+```bash
+jev-codex --jev-dashboard     # or: jev-claude --jev-dashboard
+```
+
+starts the router if needed and opens `http://localhost:8790/dashboard` (`8789` for Claude, and
+`http://localhost:8787/dashboard` on a standalone `pnpm dev` server). Each router gets a status —
+**Routing**, **Passthrough only**, **Jev is failing**, **Idle** or **Offline** — above the share of
+requests per mode, the passthrough reasons explained, Jev's latency / confidence / token spend, a
+timeline and a live table of recent requests.
+
+`jev-codex` and `jev-claude` each run their own router, and one page shows both: the dashboard of
+either polls the other's `GET /dashboard/events` (readable across ports by pages served from
+localhost only; `?peers=8795,8796` adds routers on non-default ports). A router keeps its last
+1,000 route events in memory and, under a launcher, replays its `~/.jev-gateway/<client>.log` at
+startup, so history survives a restart (`JEV_LOG_FILE` does the same for a standalone server whose
+stdout you append to a file). Only what the log line already holds is ever exposed — time, path,
+model, tool count, mode, reason, tool name, confidence, Jev latency and tokens, upstream status —
+never prompts, tool arguments or credentials. With `ROUTER_API_KEY` set the dashboard is behind it
+too: open `/dashboard?key=…`.
 
 ## Configuration
 
@@ -172,6 +196,8 @@ src/questions.ts   tools → Jev questions; detects closed-set parameters
 src/decide.ts      the Jev call and the mode decision
 src/upstream.ts    streaming reverse proxy
 src/app.ts         Hono app: routes, auth, headers, fail-open replay
+src/events.ts      in-memory ring of route events (metadata only), replayed from the log on startup
+src/dashboard.ts   GET /dashboard and /dashboard/events; dashboard.html is the whole page, no build step
 bin/                jev-codex / jev-claude launchers (shared logic in launcher.mjs)
 scripts/mock-jev.mjs  local stand-in for Jev, for end-to-end runs without a TypeSafe key
 ```

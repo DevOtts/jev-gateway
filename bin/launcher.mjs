@@ -41,6 +41,7 @@ export async function runLauncher(spec) {
   ${spec.name} --jev-start     only start the background router
   ${spec.name} --jev-status    is the router up, and where does it forward to?
   ${spec.name} --jev-logs      follow the router's decisions (run in a second terminal)
+  ${spec.name} --jev-dashboard open the monitoring dashboard: is Jev routing, and if not, why?
   ${spec.name} --jev-stop      stop the background router
   ${spec.name} --jev-config    how to point plain \`${spec.client}\` at the router permanently
 
@@ -48,6 +49,7 @@ Environment (or ${ENV_FILES.at(-1)}):
   TYPESAFE_API_KEY   required — Jev makes the tool-selection call
   ${spec.portEnv}   router port for ${spec.client} (default ${spec.defaultPort})
   ${spec.upstreamHelp}
+  BROWSER            command --jev-dashboard opens the page with; "none" only prints the URL
 `;
 
   const health = async () => {
@@ -82,7 +84,8 @@ Environment (or ${ENV_FILES.at(-1)}):
     const { UPSTREAM_API_KEY: _key, ROUTER_API_KEY: _routerKey, ...env } = process.env;
     const child = spawn(process.execPath, ROUTER_ARGS, {
       cwd: ROOT,
-      env: { ...env, PORT: String(port), UPSTREAM_BASE_URL: upstream },
+      // JEV_LOG_FILE is where stdout goes (below): the router replays it so the dashboard keeps its history.
+      env: { ...env, PORT: String(port), UPSTREAM_BASE_URL: upstream, JEV_CLIENT: spec.client, JEV_LOG_FILE: logFile },
       detached: true,
       stdio: ["ignore", log, log],
     });
@@ -112,6 +115,26 @@ Environment (or ${ENV_FILES.at(-1)}):
     rmSync(pidFile, { force: true });
   };
 
+  /** Whichever opener this platform has; under WSL the browser lives on the Windows side. */
+  const openBrowser = async (url) => {
+    const wsl = process.platform === "linux" && Boolean(process.env.WSL_DISTRO_NAME);
+    const openers = [
+      ...(process.env.BROWSER ? [[process.env.BROWSER, url]] : []),
+      ...(process.platform === "darwin" ? [["open", url]] : []),
+      ...(process.platform === "win32" ? [["cmd", "/c", "start", "", url]] : []),
+      ...(wsl ? [["wslview", url], ["cmd.exe", "/c", "start", "", url]] : []),
+      ["xdg-open", url],
+    ];
+    for (const [command, ...args] of openers) {
+      const started = await new Promise((done) => {
+        const child = spawn(command, args, { stdio: "ignore", detached: true });
+        child.once("error", () => done(false));
+        child.once("spawn", () => (child.unref(), done(true)));
+      });
+      if (started) return;
+    }
+  };
+
   const [flag] = process.argv.slice(2);
   if (flag === "--jev-help") return console.log(help);
   if (flag === "--jev-stop") return stopRouter();
@@ -124,6 +147,22 @@ Environment (or ${ENV_FILES.at(-1)}):
     const running = await health();
     console.log(running ? `${spec.name}: router up on ${origin} → ${running.upstream}` : `${spec.name}: router is not running`);
     return console.log(`logs: ${logFile}`);
+  }
+  if (flag === "--jev-dashboard") {
+    await ensureRouter();
+    // `localhost`, not 127.0.0.1: it is the name WSL forwards to a browser running on Windows.
+    const base = `http://localhost:${port}/dashboard`;
+    // The page looks for the other launchers' routers on their default ports; tell it about moved ones.
+    const peers = Object.entries(process.env).flatMap(([name, value]) => (/^JEV_[A-Z]+_PORT$/.test(name) && value !== String(port) ? [value] : []));
+    const url = peers.length ? `${base}?peers=${peers.join(",")}` : base;
+    const served = await fetch(url).then((response) => response.ok, () => false);
+    if (!served) {
+      console.error(`${spec.name}: the router on :${port} predates the dashboard. Run \`${spec.name} --jev-stop\` and try again.`);
+      process.exit(1);
+    }
+    console.log(`${spec.name}: dashboard at ${url}`);
+    if (process.env.BROWSER !== "none") await openBrowser(url);
+    return;
   }
   if (flag === "--jev-logs") {
     mkdirSync(STATE_DIR, { recursive: true });
