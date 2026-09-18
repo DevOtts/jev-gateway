@@ -6,8 +6,10 @@ import { chatAdapter } from "./adapters/chat.js";
 import { messagesAdapter } from "./adapters/messages.js";
 import { responsesAdapter } from "./adapters/responses.js";
 import type { Config } from "./config.js";
+import { dashboardRoutes } from "./dashboard.js";
 import { redactHeaders, summarizeResponse, type Dump } from "./debug.js";
 import { decide, type AskJev, type Decision } from "./decide.js";
+import { createEventLog, type EventLog } from "./events.js";
 import { forward } from "./upstream.js";
 
 export interface Deps {
@@ -16,6 +18,8 @@ export interface Deps {
   /** Upstream transport; defaults to global fetch. */
   fetch?: typeof fetch;
   log?: (entry: Record<string, unknown>) => void;
+  /** What the dashboard shows; defaults to an empty in-memory log. */
+  events?: EventLog;
   /** Opt-in wire dumps (see debug.ts); off by default. */
   dump?: Dump;
 }
@@ -60,8 +64,14 @@ function decisionHeaders(decision: Decision): Record<string, string> {
   return headers;
 }
 
-export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () => {}, dump }: Deps) {
+export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: writeLog = () => {}, events = createEventLog(), dump }: Deps) {
   const app = new Hono();
+
+  /** One routed request: a line in the log, and a row on the dashboard. */
+  const log = (entry: Record<string, unknown>) => {
+    writeLog(entry);
+    events.record(entry);
+  };
 
   /**
    * Error bodies are the only documentation an undocumented backend offers, and a finished
@@ -154,7 +164,10 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () =
 
   app.use("*", async (c, next) => {
     if (!config.routerApiKey) return next();
-    const presented = c.req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+    // A browser can't attach a header to a page it navigates to, so the dashboard — and only the
+    // dashboard — may carry the key as `?key=`.
+    const inQuery = c.req.path.startsWith("/dashboard") ? c.req.query("key") : undefined;
+    const presented = c.req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? inQuery ?? "";
     if (safeEqual(presented, config.routerApiKey)) return next();
     return c.json({ error: { message: "Invalid jev-gateway API key", type: "invalid_api_key" } }, 401);
   });
@@ -179,6 +192,8 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () =
     const adapter = (adapters[format] ?? adapters[guess]) as Adapter<AnyRequest>;
     return c.json((await decideFor(adapter, req)).decision);
   });
+
+  app.route("/dashboard", dashboardRoutes(config, events));
 
   app.post("/v1/chat/completions", route(chatAdapter));
   app.post("/v1/responses", route(responsesAdapter));

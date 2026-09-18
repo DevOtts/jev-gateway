@@ -33,7 +33,7 @@
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
     "start": "node --env-file-if-exists=.env dist/index.js",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/dashboard.html dist/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "codex": "node bin/jev-codex.mjs",

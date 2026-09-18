@@ -20,6 +20,10 @@ export interface Config {
   maxMessageChars: number;
   /** Opt-in: dump every routed request (decoded body, redacted headers) into this directory. */
   debugDumpDir?: string;
+  /** Who this router serves ("codex", "claude"); the dashboard labels its traffic with it. */
+  client: string;
+  /** JSON-lines file this process's stdout is appended to, if any: the dashboard's history. */
+  logFile?: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -63,6 +67,8 @@ export function loadConfig(env: Env = process.env): Config {
     maxStateChars: num(env, "JEV_MAX_STATE_CHARS", 60_000),
     maxMessageChars: num(env, "JEV_MAX_MESSAGE_CHARS", 4_000),
     debugDumpDir: str(env, "JEV_DEBUG_DUMP_DIR"),
+    client: str(env, "JEV_CLIENT") ?? "standalone",
+    logFile: str(env, "JEV_LOG_FILE"),
   };
   if (config.routerApiKey && !config.upstreamApiKey) {
     throw new Error("ROUTER_API_KEY requires UPSTREAM_API_KEY (the client key is not valid upstream)");
