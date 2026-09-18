@@ -15,6 +15,29 @@ export interface ForwardOptions {
   responseHeaders?: Record<string, string>;
 }
 
+/**
+ * A client that hangs up mid-stream aborts the upstream read, which surfaces as a stream error
+ * and gets logged as one by the HTTP server. It isn't: Codex closes every SSE stream as soon as
+ * it has `response.completed`. End the body quietly instead; real upstream errors still propagate.
+ */
+function quietOnClientAbort(body: ReadableStream<Uint8Array> | null, signal: AbortSignal) {
+  if (!body) return body;
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      } catch (error) {
+        if (signal.aborted) controller.close();
+        else controller.error(error);
+      }
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+}
+
 /** Proxy a gateway request (`/v1/...`) to the upstream API, streaming the response back. */
 export async function forward(
   incoming: Request,
@@ -57,5 +80,5 @@ export async function forward(
     if (!DROPPED_RESPONSE_HEADERS.has(name)) responseHeaders.set(name, value);
   });
   for (const [name, value] of Object.entries(options.responseHeaders ?? {})) responseHeaders.set(name, value);
-  return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+  return new Response(quietOnClientAbort(upstream.body, incoming.signal), { status: upstream.status, headers: responseHeaders });
 }

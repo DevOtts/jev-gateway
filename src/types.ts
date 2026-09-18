@@ -72,6 +72,11 @@ export interface RouterTool {
    * but never forced.
    */
   kind: "function" | "custom" | "hosted";
+  /**
+   * Set when `name` is namespace-qualified (`clock.sleep`). Such tools are offered to Jev but
+   * never forced: `tool_choice` has no way to address them (see README, "Codex on a subscription").
+   */
+  namespace?: string;
 }
 
 export interface RouterInput {

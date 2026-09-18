@@ -5,6 +5,7 @@ import type { Adapter } from "./adapters/adapter.js";
 import { chatAdapter } from "./adapters/chat.js";
 import { responsesAdapter } from "./adapters/responses.js";
 import type { Config } from "./config.js";
+import { redactHeaders, summarizeResponse, type Dump } from "./debug.js";
 import { decide, type AskJev, type Decision } from "./decide.js";
 import { forward } from "./upstream.js";
 
@@ -14,6 +15,8 @@ export interface Deps {
   /** Upstream transport; defaults to global fetch. */
   fetch?: typeof fetch;
   log?: (entry: Record<string, unknown>) => void;
+  /** Opt-in wire dumps (see debug.ts); off by default. */
+  dump?: Dump;
 }
 
 type AnyRequest = { model?: string; stream?: boolean; tools?: unknown[] };
@@ -54,26 +57,58 @@ function decisionHeaders(decision: Decision): Record<string, string> {
   return headers;
 }
 
-export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () => {} }: Deps) {
+export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () => {}, dump }: Deps) {
   const app = new Hono();
 
-  const decideFor = <Req extends AnyRequest>(adapter: Adapter<Req>, req: Req): Promise<Decision> | Decision => {
+  /**
+   * Error bodies are the only documentation an undocumented backend offers, and a finished
+   * stream's usage is the only way to see what a rewrite did to the prompt cache: keep both.
+   * Reads a clone in the background, so the client's stream is never delayed.
+   */
+  const dumpResponse = (kind: string, response: Response, extra: Record<string, unknown> = {}) => {
+    if (!dump) return;
+    const failed = response.status >= 400;
+    const copy = response.clone();
+    void (async () => {
+      let text = "";
+      try {
+        // Codex hangs up the moment it has `response.completed`, which aborts the upstream read
+        // mid-stream: whatever arrived until then is the response.
+        for await (const chunk of copy.body?.pipeThrough(new TextDecoderStream()) ?? []) text += chunk;
+      } catch {}
+      dump(failed ? kind : "response", {
+        status: response.status,
+        ...extra,
+        ...(failed ? { body: text.slice(0, 20_000) } : summarizeResponse(text)),
+      });
+    })();
+  };
+
+  /** The decision, plus how many tools the adapter found — they aren't always in `req.tools`. */
+  const decideFor = async <Req extends AnyRequest>(adapter: Adapter<Req>, req: Req) => {
     const input = adapter.toInput(req, config.maxMessageChars);
-    return "skip" in input ? { mode: "passthrough", reason: input.skip } : decide(input, config, askJev);
+    if ("skip" in input) return { decision: { mode: "passthrough", reason: input.skip } as Decision, tools: undefined };
+    return { decision: await decide(input, config, askJev), tools: input.tools.length };
   };
 
   const route = <Req extends AnyRequest>(adapter: Adapter<Req>) => async (c: Context) => {
     const bytes = new Uint8Array(await c.req.arrayBuffer());
     // Unreadable bodies are not ours to judge: upstream produces its own error for them.
     const req = parseBody<Req>(bytes, c.req.header("content-encoding"));
+    dump?.("request", {
+      method: c.req.method,
+      path: c.req.path,
+      headers: redactHeaders(c.req.raw.headers),
+      body: req ?? `[unparseable, ${bytes.length} bytes]`,
+    });
 
-    let decision: Decision = !req
-      ? { mode: "passthrough", reason: "unparseable_body" }
-      : c.req.header("x-jev-router") === "off"
-        ? { mode: "passthrough", reason: "disabled_by_header" }
-        : await decideFor(adapter, req);
+    let decision: Decision;
+    let tools: number | undefined;
+    if (!req) decision = { mode: "passthrough", reason: "unparseable_body" };
+    else if (c.req.header("x-jev-router") === "off") decision = { mode: "passthrough", reason: "disabled_by_header" };
+    else ({ decision, tools } = await decideFor(adapter, req));
 
-    const entry = { event: "route", path: c.req.path, model: req?.model, tools: req?.tools?.length ?? 0 };
+    const entry = { event: "route", path: c.req.path, model: req?.model, tools: tools ?? req?.tools?.length ?? 0 };
     if (req && decision.mode === "direct") {
       log({ ...entry, ...decision });
       const call = { tool: decision.tool, args: decision.args, inputTokens: decision.jev?.inputTokens ?? 0 };
@@ -88,8 +123,11 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () =
     }
 
     if (req && decision.mode !== "passthrough") {
-      const body = JSON.stringify(adapter.apply(req, decision, config.argsModel));
+      const rewritten = adapter.apply(req, decision, config.argsModel);
+      const body = JSON.stringify(rewritten);
       const response = await forward(c.req.raw, config, fetchImpl, { body, responseHeaders: decisionHeaders(decision) });
+      const sent = { mode: decision.mode, model: rewritten.model, tool_choice: (rewritten as { tool_choice?: unknown }).tool_choice };
+      dumpResponse("rejected", response, { sent });
       if (response.status !== 400 && response.status !== 422) {
         log({ ...entry, ...decision, status: response.status });
         return response;
@@ -105,6 +143,7 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () =
       responseHeaders: decisionHeaders(decision),
     });
     log({ ...entry, ...decision, status: response.status });
+    dumpResponse("upstream-error", response);
     return response;
   };
 
@@ -125,14 +164,18 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log = () =
     const req = parseBody<Record<string, unknown>>(new Uint8Array(await c.req.arrayBuffer()), undefined);
     if (!req) return c.json({ error: { message: "Body must be a JSON object", type: "invalid_request_error" } }, 400);
     const adapter = ("messages" in req ? chatAdapter : responsesAdapter) as Adapter<AnyRequest>;
-    return c.json(await decideFor(adapter, req));
+    return c.json((await decideFor(adapter, req)).decision);
   });
 
   app.post("/v1/chat/completions", route(chatAdapter));
   app.post("/v1/responses", route(responsesAdapter));
 
   // Everything else (models, embeddings, …) is proxied untouched.
-  app.all("/v1/*", (c) => forward(c.req.raw, config, fetchImpl));
+  app.all("/v1/*", async (c) => {
+    const response = await forward(c.req.raw, config, fetchImpl);
+    dump?.("other", { method: c.req.method, path: c.req.path, headers: redactHeaders(c.req.raw.headers), status: response.status });
+    return response;
+  });
 
   return app;
 }

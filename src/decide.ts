@@ -137,6 +137,8 @@ export async function decide(input: RouterInput, config: Config, askJev: AskJev)
   if (!plan || !tool) return { mode: "passthrough", reason: "jev_unknown_tool", jev };
   // Provider-run tools can't be forced by name; knowing Jev wants one is still worth logging.
   if (tool.kind === "hosted") return { mode: "passthrough", reason: "hosted_tool_selected", jev };
+  // Neither can namespaced ones: backends reject both `tool_choice.namespace` and the bare name.
+  if (tool.namespace) return { mode: "passthrough", reason: "namespaced_tool_selected", jev };
 
   const resolved = plan.closedParams && resolveArgs(plan, toolIndex, result.answers, config.argMinCertainty);
   if (resolved) {

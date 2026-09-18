@@ -32,6 +32,75 @@ const codexRequest = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
+/**
+ * What Codex 0.154 really sends for its "responses-lite" models (captured with JEV_DEBUG_DUMP_DIR,
+ * trimmed): no `tools`, no `instructions` — tools arrive as an `additional_tools` input item grouped
+ * into namespaces, and the one that matters is `exec`, a free-form tool that runs JavaScript.
+ */
+const codexLiteRequest = (extra: Record<string, unknown> = {}) => ({
+  model: "gpt-6-astra",
+  input: [
+    {
+      type: "additional_tools",
+      id: "at_1",
+      role: "developer",
+      tools: [
+        {
+          type: "namespace",
+          name: "functions",
+          description: "",
+          tools: [
+            {
+              type: "custom",
+              name: "exec",
+              description: "Run JavaScript code to orchestrate/compose tool calls",
+              format: { type: "grammar", syntax: "lark", definition: "start: SOURCE" },
+            },
+            {
+              type: "function",
+              name: "wait",
+              description: "Waits on a yielded `exec` cell.",
+              strict: false,
+              parameters: { type: "object", properties: { cell_id: { type: "string" } }, required: ["cell_id"] },
+            },
+          ],
+        },
+        {
+          type: "namespace",
+          name: "clock",
+          description: "Tools for reading and waiting on time.",
+          tools: [
+            {
+              type: "function",
+              name: "sleep",
+              description: "Pause execution for a specified duration.",
+              strict: false,
+              parameters: { type: "object", properties: { duration_ms: { type: "number" } }, required: ["duration_ms"] },
+            },
+          ],
+        },
+      ],
+    },
+    { type: "message", id: "msg_1", role: "developer", content: [{ type: "input_text", text: "You are Codex." }] },
+    { type: "message", id: "msg_2", role: "user", content: [{ type: "input_text", text: "sleep 10 ms, then run echo hi" }] },
+    { type: "message", id: "msg_3", role: "assistant", content: [{ type: "output_text", text: "I’ll wait first." }], phase: "commentary" },
+    { type: "function_call", id: "fc_1", name: "sleep", namespace: "clock", arguments: '{"duration_ms":10}', call_id: "call_1" },
+    { type: "function_call_output", id: "fco_1", call_id: "call_1", output: "slept" },
+    { type: "custom_tool_call", id: "ctc_1", status: "completed", call_id: "call_2", name: "exec", input: 'text((await tools.exec_command({cmd:"echo hi"})).output);' },
+    {
+      type: "custom_tool_call_output",
+      id: "ctco_1",
+      call_id: "call_2",
+      output: [{ type: "input_text", text: "Script completed\nOutput:\n" }, { type: "input_text", text: "hi\n" }],
+    },
+  ],
+  tool_choice: "auto",
+  parallel_tool_calls: false,
+  stream: true,
+  store: false,
+  ...extra,
+});
+
 function setup(canned: Parameters<typeof fakeJev>[0], reply?: (body: any) => Response) {
   const jev = fakeJev(canned);
   const upstream = fakeUpstream();
@@ -39,10 +108,11 @@ function setup(canned: Parameters<typeof fakeJev>[0], reply?: (body: any) => Res
     const response = await upstream.fetchImpl(input, init);
     return reply?.(upstream.calls.at(-1)!.body) ?? response;
   }) as typeof fetch;
-  const app = createApp({ config: testConfig(), askJev: jev.askJev, fetch: fetchImpl });
+  const logged: Record<string, unknown>[] = [];
+  const app = createApp({ config: testConfig(), askJev: jev.askJev, fetch: fetchImpl, log: (entry) => logged.push(entry) });
   const post = (body: BodyInit, headers: Record<string, string> = {}) =>
     app.request("/v1/responses", { method: "POST", headers: { "content-type": "application/json", ...headers }, body });
-  return { post, jev, upstream };
+  return { post, jev, upstream, logged };
 }
 
 describe("POST /v1/responses", () => {
@@ -145,6 +215,43 @@ describe("POST /v1/responses", () => {
     expect(await res.json()).toEqual({ id: "resp_ok" });
     expect(res.headers.get("x-jev-router-reason")).toBe("upstream_rejected_forced");
     expect(upstream.calls.map((call) => call.body.tool_choice)).toEqual([{ type: "function", name: "shell" }, "auto"]);
+  });
+
+  it("finds tools declared as `additional_tools` input items, namespaces included", async () => {
+    const { post, jev, upstream, logged } = setup({ tool: { choice: "exec" }, needs_tool: { noul: 0.9 } });
+    await post(JSON.stringify(codexLiteRequest()));
+
+    const { state, questions } = jev.requests[0]!;
+    const tool = questions.tool!;
+    expect(tool.type === "choice" && tool.criteria).toMatchObject({
+      exec: "Run JavaScript code to orchestrate/compose tool calls",
+      wait: "Waits on a yielded `exec` cell.",
+      "clock.sleep": "[Tools for reading and waiting on time.] Pause execution for a specified duration.",
+    });
+    expect(state).toEqual({
+      assistant_instructions: "You are Codex.",
+      conversation: [
+        { role: "user", text: "sleep 10 ms, then run echo hi" },
+        { role: "assistant", text: "I’ll wait first." },
+        { role: "assistant", tool_calls: [{ tool: "clock.sleep", arguments: '{"duration_ms":10}' }] },
+        { role: "tool_result", tool: "clock.sleep", content: "slept" },
+        { role: "assistant", tool_calls: [{ tool: "exec", arguments: 'text((await tools.exec_command({cmd:"echo hi"})).output);' }] },
+        { role: "tool_result", tool: "exec", content: "Script completed\nOutput:\n\nhi\n" },
+      ],
+    });
+    expect(upstream.calls[0]!.body.tool_choice).toEqual({ type: "custom", name: "exec" });
+    // The declaration itself must reach upstream untouched.
+    expect(upstream.calls[0]!.body.input[0]).toEqual(codexLiteRequest().input[0]);
+    expect(logged[0]).toMatchObject({ tools: 3, mode: "forced", tool: "exec" });
+  });
+
+  it("never forces a namespaced tool: tool_choice cannot address one", async () => {
+    // ChatGPT's backend answers 400 to both `tool_choice.namespace` and the bare name.
+    const { post, upstream } = setup({ tool: { choice: "clock.sleep" }, needs_tool: { noul: 0.9 } });
+    const res = await post(JSON.stringify(codexLiteRequest()));
+    expect(res.headers.get("x-jev-router-reason")).toBe("namespaced_tool_selected");
+    expect(upstream.calls).toHaveLength(1);
+    expect(upstream.calls[0]!.body.tool_choice).toBe("auto");
   });
 
   it("stays out of the way when history lives server-side", async () => {

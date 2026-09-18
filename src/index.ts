@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { createDump } from "./debug.js";
 
 const config = loadConfig();
 
@@ -15,6 +16,7 @@ const jev = new TypeSafeClient({
 const app = createApp({
   config,
   askJev: (request) => jev.systemOne(request),
+  dump: createDump(config.debugDumpDir),
   log: (entry) => console.log(JSON.stringify({ time: new Date().toISOString(), ...entry })),
 });
 
