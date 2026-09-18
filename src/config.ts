@@ -1,4 +1,6 @@
 export interface Config {
+  /** Interface to listen on. Loopback by default: the gateway forwards credentials and must not be reachable from the LAN. */
+  host: string;
   port: number;
   /** OpenAI-compatible API root, including the `/v1` suffix. */
   upstreamBaseUrl: string;
@@ -53,6 +55,7 @@ export function loadConfig(env: Env = process.env): Config {
     throw new Error(`JEV_ON_NONE must be "force_none" or "passthrough", got "${onNone}"`);
   }
   const config: Config = {
+    host: str(env, "HOST") ?? "127.0.0.1",
     port: num(env, "PORT", 8787),
     upstreamBaseUrl: (str(env, "UPSTREAM_BASE_URL") ?? "https://api.openai.com/v1").replace(/\/+$/, ""),
     upstreamApiKey: str(env, "UPSTREAM_API_KEY"),

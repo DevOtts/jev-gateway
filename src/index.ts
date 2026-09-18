@@ -22,7 +22,7 @@ const app = createApp({
   log: (entry) => console.log(JSON.stringify({ time: new Date().toISOString(), ...entry })),
 });
 
-serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
+serve({ fetch: app.fetch, hostname: config.host, port: config.port }, ({ port }) => {
   console.log(`jev-gateway listening on http://localhost:${port} → ${config.upstreamBaseUrl} (jev: ${config.jevModel})`);
   console.log(`dashboard: http://localhost:${port}/dashboard`);
 });
