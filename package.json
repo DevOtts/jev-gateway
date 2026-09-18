@@ -1,7 +1,7 @@
 {
   "name": "jev-gateway",
   "version": "0.1.0",
-  "description": "LLM gateway that hands tool-selection decisions to TypeSafe's Jev model \u2014 with launchers for Codex and Claude Code",
+  "description": "Local LLM gateway that lets TypeSafe's Jev model pick the tool for coding agents. Launchers for Codex and Claude Code, with a monitoring dashboard.",
   "keywords": [
     "llm",
     "gateway",
@@ -18,7 +18,7 @@
   "author": "Vinicius Lana",
   "type": "module",
   "engines": {
-    "node": ">=22.9"
+    "node": ">=22.15"
   },
   "bin": {
     "jev-codex": "bin/jev-codex.mjs",

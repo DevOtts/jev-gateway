@@ -1,85 +1,178 @@
 # jev-gateway
 
-> Independent project — not affiliated with or endorsed by TypeSafe. "Jev" is TypeSafe's model; this
-> gateway is a client of its public API.
+A local LLM gateway for coding agents. When your agent is about to decide **which tool to call**,
+the gateway asks [Jev](https://docs.typesafe.ai/introduction), TypeSafe's fast decision model,
+instead of leaving that choice to the expensive reasoning model. Everything else goes to your usual
+LLM untouched.
 
-An LLM gateway that speaks Chat Completions, the Responses API and the Anthropic Messages API.
-Point your client — or Codex, or Claude Code — at it instead of your LLM provider; whenever a
-request is really asking **"which tool should I call?"**, the router hands that decision to
-[Jev](https://docs.typesafe.ai/introduction) — TypeSafe's System One model — instead of paying a
-reasoning LLM to make it.
+It works with **Codex** and **Claude Code** out of the box, including on ChatGPT and claude.ai
+subscriptions, and with any client that speaks the OpenAI or Anthropic APIs.
 
-Jev doesn't generate text. It answers typed questions (Choice / Score / Noul) about a piece of
-state and returns calibrated probabilities plus a confidence, in one fast call. Tool selection is
-exactly that kind of question, so the split is:
+> Independent project, not affiliated with or endorsed by TypeSafe. "Jev" is TypeSafe's model and
+> this gateway is a client of its public API.
 
-| Decision | Who makes it |
-| --- | --- |
-| Which tool, or no tool at all | **Jev** (Choice over the tool list + a Noul cross-check) |
-| Arguments that are enums / booleans / consts | **Jev** (fanned out in the same call) |
-| Open-ended arguments (free text, numbers, dates) | Upstream LLM, with `tool_choice` forced to Jev's pick |
-| Plain text replies, everything without `tools` | Upstream LLM, untouched |
+## Quick start
 
-## How a request is routed
+You need Node.js 22.15 or newer, a [TypeSafe API key](https://docs.typesafe.ai/introduction), and
+Codex and/or Claude Code already installed and logged in.
 
-`POST /v1/chat/completions` with `tools` and `tool_choice` of `auto`/`required` triggers **one**
-Jev call. The conversation becomes the state; the questions are:
-
-- `tool` — Choice: every tool name → its description, plus `no_tool_needed` (omitted for `required`)
-- `needs_tool` — Noul: an independent "does the assistant need a tool now?" check
-- `arg:*` / `stated:*` — for each tool whose parameters are *all* closed-set, one question per
-  argument (and "was it stated?" for optional ones), asked speculatively since extra questions are
-  nearly free
-
-The answer picks one of five modes, reported in the `x-jev-gateway-mode` response header:
-
-| Mode | When | What happens |
-| --- | --- | --- |
-| `direct` | Tool is confident and every argument is closed-set and certain | The router synthesizes the `tool_calls` response itself (streaming included). **No LLM call.** |
-| `forced` | Tool is confident, arguments need an LLM | Forwarded with `tool_choice` set to that function — and to `ARGS_MODEL` if configured, since the hard part is already done |
-| `hint` | Tool is confident, but `tool_choice` can't be rewritten (Anthropic: extended thinking on, or the conversation is prompt-cached) | Forwarded with a one-line suggestion appended *after* the client's last block, so cached prefixes stay intact. The LLM may disagree |
-| `none` | Jev is confident no tool is needed | Forwarded with `tool_choice: "none"` (or untouched with `JEV_ON_NONE=passthrough`) |
-| `passthrough` | Low confidence, the two questions disagree, Jev errored/timed out, no tools, caller already chose | Forwarded byte-for-byte; `x-jev-gateway-reason` says why |
-
-Rosters over 120 tools (Claude Code sends ~280) don't fit one good question, so they take two Jev
-calls: every shard of the roster is ranked in one call, and the top 3 of each go on to the decision
-above with full-length descriptions.
-
-The router always **fails open**: any Jev problem means the LLM decides, as if the gateway weren't
-there. All other `/v1/*` routes (models, embeddings, …) are proxied unchanged.
-
-## Install
+**1. Install**
 
 ```bash
 npm install -g jev-gateway
-mkdir -p ~/.jev-gateway && echo "TYPESAFE_API_KEY=…" > ~/.jev-gateway/.env
-jev-codex        # or: jev-claude
 ```
 
-That is all the two launchers need (details below). To run the gateway as a standalone server for
-your own clients, work from a checkout:
+**2. Save your TypeSafe key**
 
-## Run it
+```bash
+mkdir -p ~/.jev-gateway
+echo "TYPESAFE_API_KEY=your-key-here" > ~/.jev-gateway/.env
+```
+
+**3. Run your agent through the gateway**
+
+```bash
+jev-codex      # use it exactly like `codex`
+jev-claude     # use it exactly like `claude`
+```
+
+**4. Watch it work**
+
+```bash
+jev-codex --jev-dashboard
+```
+
+That's it. Your existing login keeps working, nothing in `~/.codex` or `~/.claude` is changed, and
+plain `codex` and `claude` still behave as before. Only sessions started with the `jev-` commands go
+through the gateway.
+
+## What to expect
+
+- The first `jev-codex` or `jev-claude` starts a small gateway in the background and then opens your
+  agent. Every argument is passed through, so `jev-codex exec "fix the failing test"` works like
+  `codex exec "fix the failing test"`.
+- The gateway keeps running after you close the agent, so the next session starts instantly. Stop it
+  with `--jev-stop`.
+- Each turn, the gateway asks Jev which tool fits. When Jev is confident, the gateway steers the LLM
+  to that tool. When it is not, the request goes through unchanged.
+- If Jev is down, slow, or your key is wrong, every request simply goes straight to the LLM. The
+  gateway never makes a request fail.
+- It listens on `127.0.0.1` only.
+
+## Commands
+
+All of these work with both `jev-codex` and `jev-claude`.
+
+| Command | What it does |
+| --- | --- |
+| `jev-codex [args]` | Start the gateway if needed, then run Codex through it |
+| `jev-codex --jev-dashboard` | Open the monitoring dashboard in your browser |
+| `jev-codex --jev-routing off` | Baseline mode: stop asking Jev, keep counting tokens |
+| `jev-codex --jev-routing on` | Let Jev decide again |
+| `jev-codex --jev-status` | Is the gateway running, and where does it forward to? |
+| `jev-codex --jev-logs` | Follow routing decisions live (use a second terminal) |
+| `jev-codex --jev-start` | Start the gateway without opening the agent |
+| `jev-codex --jev-stop` | Stop the background gateway (close your sessions first) |
+| `jev-codex --jev-config` | Print settings to point plain `codex` at the gateway permanently |
+| `jev-codex --jev-help` | List all of the above |
+
+Codex uses port 8790 and Claude Code uses port 8789. Change them with `JEV_CODEX_PORT` and
+`JEV_CLAUDE_PORT`.
+
+## Dashboard
+
+```bash
+jev-codex --jev-dashboard     # or: jev-claude --jev-dashboard
+```
+
+This opens `http://localhost:8790/dashboard`. If no browser window appears, paste that address into
+your browser. One page shows both gateways (Codex and Claude) and refreshes every 2 seconds.
+
+You will see:
+
+- **A status per gateway:** Routing, Passthrough only, Jev is failing, Idle, Baseline, or Offline,
+  with a one-line explanation.
+- **Why requests were not routed,** with each reason explained in plain English.
+- **Jev's numbers:** calls, latency, confidence, and what it cost.
+- **LLM tokens:** input (and how much came from the prompt cache), output (and how much was hidden
+  reasoning), and seconds per request.
+- **A live table** of recent requests. A request appears when its reply finishes, because that is
+  when the provider reports its tokens.
+
+The dashboard only shows request metadata. Prompts, tool arguments, and credentials never reach it.
+
+### Is it worth it? Compare with a baseline
+
+Switch routing off to measure the same work without Jev. The gateway keeps forwarding and counting
+tokens, but never asks Jev and rewrites nothing.
+
+```bash
+jev-codex --jev-routing off    # do a task
+jev-codex --jev-routing on     # do a similar task
+```
+
+The same switch is a button on each gateway card. The "Token use" card then shows both states side
+by side: tokens in and out per request, cache share, reasoning tokens, and seconds. The comparison
+is only meaningful if you do similar work in both states.
+
+## Using it with Codex
+
+`jev-codex` reuses your existing Codex login. With a ChatGPT subscription the gateway forwards to
+`https://chatgpt.com/backend-api/codex`. With an API key it forwards to `https://api.openai.com/v1`.
+Override either with `JEV_CODEX_UPSTREAM_BASE_URL`.
+
+Codex speaks the Responses API, so the gateway handles `POST /v1/responses`, including Codex's
+free-form tools such as `apply_patch`, tools declared inside the conversation, and compressed
+request bodies. If the backend rejects a rewritten request, the gateway resends the original, so
+Codex never sees an error caused by the gateway.
+
+## Using it with Claude Code
+
+`jev-claude` runs `claude` with only `ANTHROPIC_BASE_URL` set. Claude Code keeps using its saved
+login, so a claude.ai subscription keeps working and its usual limits apply.
+
+Jev can do less here than with Codex, because of how the Anthropic API works. Claude Code runs with
+extended thinking, and the API rejects a forced tool while thinking is on. It also rereads a cached
+conversation on every turn, and changing `tool_choice` would invalidate that cache. So for Claude
+Code the gateway adds a short suggestion to the request instead (`hint` mode), which the model is
+free to ignore. Expect better tool picks on large tool lists, not lower cost or latency.
+
+## Running it as a server for your own app
+
+Work from a checkout:
 
 ```bash
 pnpm install
-cp .env.example .env    # set TYPESAFE_API_KEY, and UPSTREAM_BASE_URL if not OpenAI
-pnpm dev
+cp .env.example .env    # set TYPESAFE_API_KEY, and UPSTREAM_BASE_URL if you don't use OpenAI
+pnpm dev                # listens on http://localhost:8787
 ```
+
+Then point your client at it:
 
 ```python
 from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8787/v1")  # your usual provider key still works
 ```
 
-By default the client's own `Authorization` header is forwarded upstream. Set `UPSTREAM_API_KEY`
-to have the gateway hold the provider key, and `ROUTER_API_KEY` to require a gateway key from
-clients. Any OpenAI-compatible upstream works (OpenAI, OpenRouter, vLLM, Ollama, LiteLLM, …).
+The gateway routes three endpoints and proxies every other `/v1/*` path unchanged:
 
-### Try a decision without an upstream
+| Endpoint | API |
+| --- | --- |
+| `POST /v1/chat/completions` | OpenAI Chat Completions |
+| `POST /v1/responses` | OpenAI Responses |
+| `POST /v1/messages` | Anthropic Messages |
 
-`POST /router/decide` takes a chat.completions body, calls Jev, and returns the decision — mode,
-tool, arguments, Jev's confidence, top probabilities, tokens and latency — without calling the LLM:
+By default your client's own `Authorization` header is forwarded to the provider. Set
+`UPSTREAM_API_KEY` to have the gateway hold the provider key instead, and `ROUTER_API_KEY` to
+require a gateway key from clients. Any OpenAI-compatible provider works, for example OpenAI,
+OpenRouter, vLLM, Ollama, or LiteLLM.
+
+To skip Jev for a single request, send the header `x-jev-gateway: off`.
+
+### Try a decision without calling any LLM
+
+`POST /router/decide` takes a request body, asks Jev, and returns the decision: the mode, the tool,
+the arguments, Jev's confidence, and its latency.
 
 ```bash
 curl -s localhost:8787/router/decide -H 'content-type: application/json' -d '{
@@ -93,134 +186,95 @@ curl -s localhost:8787/router/decide -H 'content-type: application/json' -d '{
 }'
 ```
 
-Send `x-jev-gateway: off` on any request to bypass Jev for that call.
+## How it works
 
-## Use it with Codex (local)
+Jev does not generate text. It answers typed questions about a piece of state (pick one option,
+give a score, or yes/no) and returns calibrated probabilities with a confidence, in one fast call.
+Choosing a tool is exactly that kind of question, so the work is split like this:
 
-Codex only speaks the Responses API, so the router handles `POST /v1/responses` the same way as
-chat completions — including Codex's free-form tools (`apply_patch`), provider-run tools
-(`web_search`, offered to Jev but never forced) and zstd-compressed request bodies.
+| Decision | Who makes it |
+| --- | --- |
+| Which tool, or no tool at all | **Jev** |
+| Arguments that are enums, booleans, or constants | **Jev**, in the same call |
+| Open-ended arguments such as free text, numbers, and dates | The LLM, already pointed at Jev's tool |
+| Plain text replies, and any request without tools | The LLM, untouched |
 
-```bash
-jev-codex                # instead of `codex`; every codex argument still works
-jev-codex exec "fix the failing test"
-jev-codex --jev-logs     # second terminal: watch each routing decision live
-```
+A request that carries tools triggers one Jev call. The conversation becomes the state, and the
+questions are: which tool (or none), whether a tool is needed at all (an independent cross-check),
+and the value of every closed-set argument. The answer selects a mode, which is reported in the
+`x-jev-gateway-mode` response header:
 
-`jev-codex` starts a background router on `127.0.0.1:8790` if one isn't running, then launches
-`codex` with a `-c model_providers.jev-gateway…` override. **Nothing in `~/.codex` is modified**, and
-plain `codex` keeps working as before. It reuses your existing Codex login
-(`requires_openai_auth = true`): with a ChatGPT subscription the router forwards to
-`https://chatgpt.com/backend-api/codex`, with an API key to `https://api.openai.com/v1`
-(override with `JEV_CODEX_UPSTREAM_BASE_URL`). `TYPESAFE_API_KEY` is read from the environment,
-`~/.jev-gateway/.env`, or a checkout's own `.env`. `jev-codex --jev-help` lists the rest (`--jev-dashboard`, `--jev-status`, `--jev-stop`,
-`--jev-config` for a permanent `codex --profile jev`).
+| Mode | When | What happens |
+| --- | --- | --- |
+| `direct` | Jev is confident about the tool and every argument is an enum, boolean, or constant | The gateway builds the tool call itself, streaming included. **No LLM call.** |
+| `forced` | Jev is confident about the tool, but some arguments are open-ended | Forwarded with `tool_choice` set to that tool, so the LLM only fills in arguments. `ARGS_MODEL` can send these to a cheaper model |
+| `hint` | Jev is confident, but `tool_choice` cannot be changed (Anthropic with thinking on, or a cached conversation) | Forwarded with a one-line suggestion added after the client's last block, so cached prefixes stay valid |
+| `none` | Jev is confident that no tool is needed | Forwarded with `tool_choice: "none"` |
+| `passthrough` | Low confidence, the two checks disagree, Jev failed, there are no tools, or the caller already chose | Forwarded byte for byte. `x-jev-gateway-reason` says why |
 
-If the upstream rejects a rewritten request (HTTP 400/422 — some backends only accept
-`tool_choice: "auto"`), the router replays the original, so Codex never sees a router-caused error.
-
-## Use it with Claude Code (local)
-
-```bash
-jev-claude               # instead of `claude`; every claude argument still works
-jev-claude -p "summarise this repo"
-jev-claude --jev-logs    # second terminal: watch each routing decision live
-```
-
-`jev-claude` starts a background router on `127.0.0.1:8789` forwarding to `https://api.anthropic.com/v1`
-and runs `claude` with only `ANTHROPIC_BASE_URL` set. With no gateway credential alongside it, Claude
-Code keeps using its saved login, so a **claude.ai subscription keeps working** and its limits apply
-as usual; **nothing in `~/.claude` is modified**. The same `--jev-*` flags as `jev-codex` apply.
-
-What Jev can do here is narrower than with Codex, by design of the API rather than the router:
-Claude Code runs with adaptive thinking (a forced `tool_choice` is rejected) and re-reads a cached
-conversation every turn (any `tool_choice` change would invalidate it). So Claude Code requests are
-steered with `hint` mode, `none` is never applied, and `direct` still answers without the LLM when
-a tool's arguments are all closed-set. API callers without thinking or message caching get `forced`.
-
-## Dashboard
-
-Is the gateway actually routing, or just passing traffic through — and if so, why?
-
-```bash
-jev-codex --jev-dashboard     # or: jev-claude --jev-dashboard
-```
-
-starts the router if needed and opens `http://localhost:8790/dashboard` (`8789` for Claude, and
-`http://localhost:8787/dashboard` on a standalone `pnpm dev` server). Each router gets a status —
-**Routing**, **Passthrough only**, **Jev is failing**, **Idle** or **Offline** — above the share of
-requests per mode, the passthrough reasons explained, Jev's latency / confidence / token spend, a
-timeline and a live table of recent requests.
-
-### Tokens, and a baseline to compare against
-
-Every forwarded request is logged once its reply has ended, with what the provider says it cost:
-input tokens (and how many came from the prompt cache), output tokens (and how many were hidden
-reasoning) and duration — read from a clone of the reply, so the client is never delayed. `direct`
-answers cost no LLM tokens; Jev's own input tokens are counted separately.
-
-To see what the same work costs **without** Jev, switch routing off: the gateway keeps proxying and
-metering, but never asks Jev and rewrites nothing.
-
-```bash
-jev-codex --jev-routing off    # baseline: straight to the LLM, still metered
-jev-codex --jev-routing on     # Jev decides again
-```
-
-The same switch is a button on each router card, and `JEV_ROUTING=off` starts a router that way.
-The dashboard puts both states side by side — tokens in/out per request, cache share, reasoning,
-seconds. It compares whatever ran in each state, so do comparable work in both.
-
-`jev-codex` and `jev-claude` each run their own router, and one page shows both: the dashboard of
-either polls the other's `GET /dashboard/events` (readable across ports by pages served from
-localhost only; `?peers=8795,8796` adds routers on non-default ports). A router keeps its last
-1,000 route events in memory and, under a launcher, replays its `~/.jev-gateway/<client>.log` at
-startup, so history survives a restart (`JEV_LOG_FILE` does the same for a standalone server whose
-stdout you append to a file). Only what the log line already holds is ever exposed — time, path,
-model, tool count, mode, reason, tool name, confidence, Jev latency and tokens, upstream status,
-LLM token counts and duration —
-never prompts, tool arguments or credentials. With `ROUTER_API_KEY` set the dashboard is behind it
-too: open `/dashboard?key=…`.
+Tool lists longer than 120 entries (Claude Code sends about 280) take two Jev calls. The first ranks
+the list in groups. The second decides among the top 3 of each group, using full descriptions.
 
 ## Configuration
 
-See [.env.example](.env.example). The ones worth tuning:
+Settings are environment variables. The launchers read them from your shell,
+`~/.jev-gateway/.env`, or a checkout's own `.env`. See [.env.example](.env.example) for the full
+list. The ones worth knowing:
 
-- `JEV_MIN_CONFIDENCE` (0.7) — below this the LLM decides. Raise it to be more conservative.
-- `JEV_ARG_MIN_CERTAINTY` (0.8) — the weakest argument must clear this for a `direct` answer;
-  otherwise the request degrades to `forced`.
-- `ARGS_MODEL` — a cheap model for argument filling in `forced` mode.
-- `JEV_DIRECT_CALLS=false` — never answer without the LLM; Jev only picks the tool.
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `TYPESAFE_API_KEY` | required | Your TypeSafe key |
+| `JEV_MIN_CONFIDENCE` | `0.7` | Below this confidence, the LLM decides. Lower it to route more, raise it to be more careful |
+| `JEV_ARG_MIN_CERTAINTY` | `0.8` | Every argument must reach this for a `direct` answer |
+| `JEV_DIRECT_CALLS` | `true` | Set to `false` so the gateway never answers without the LLM |
+| `JEV_ROUTING` | `on` | Set to `off` to start in baseline mode |
+| `JEV_TIMEOUT_MS` | `4000` | How long to wait for Jev before letting the LLM decide |
+| `ARGS_MODEL` | unset | A cheaper model for filling arguments in `forced` mode |
+| `HOST` | `127.0.0.1` | Interface to listen on. Set `ROUTER_API_KEY` before exposing it |
+| `JEV_DEBUG_DUMP_DIR` | unset | Write requests and response summaries to this folder, with credentials redacted |
 
-Each routed request logs one JSON line (mode, reason, Jev's choice/confidence/latency) to stdout.
+Each request also logs one JSON line to stdout, or to `~/.jev-gateway/<client>.log` under a launcher.
 
 ## Known trade-offs
 
+- Jev adds a network call to every turn that carries tools. Expect roughly half a second to a second.
 - Jev picks **one** tool per turn. In `forced` mode the LLM can still call that tool several times
-  in parallel, but not mix different tools in one turn; `direct` mode emits exactly one call.
-- Jev is text-only with a 32k-token state budget: images become `[image_url]` placeholders and long
-  conversations keep their newest turns (`JEV_MAX_STATE_CHARS`). It is most accurate in English.
-- A hint is a suggestion, not a decision: in `hint` mode the LLM still spends its own reasoning on
-  the choice, so the gain is accuracy on large rosters, not latency or cost.
-- Validated end to end on subscriptions (Codex 0.154 on ChatGPT, Claude Code 2.1 on claude.ai) with
-  `scripts/mock-jev.mjs` standing in for Jev: `forced`/`none` are accepted by the ChatGPT Codex
-  backend, `hint` by Anthropic. Jev's real accuracy on these rosters, and the confidence thresholds,
-  still need tuning against a real `TYPESAFE_API_KEY`.
+  in parallel, but it cannot mix different tools in the same turn.
+- A wrong forced tool can derail a turn. If the model had nothing left to do and is forced to call
+  a tool anyway, it may produce an incomplete reply and the agent will retry. Raise
+  `JEV_MIN_CONFIDENCE` if you see this.
+- In `hint` mode the LLM still does its own reasoning, so the gain is accuracy, not cost.
+- Jev reads text only and has a 32k-token window. Images become placeholders and long conversations
+  keep their newest turns. It is most accurate in English.
+- The default confidence thresholds are starting points. Use the dashboard and baseline mode to tune
+  them for your own work.
 
-## Layout
+## Development
 
-```
-src/adapters/      wire formats ↔ neutral shapes: chat.ts, responses.ts (Codex), messages.ts (Claude Code)
-src/state.ts       conversation → Jev state (truncation, newest-turns budget)
-src/questions.ts   tools → Jev questions; detects closed-set parameters
-src/decide.ts      the Jev call and the mode decision
-src/upstream.ts    streaming reverse proxy
-src/usage.ts       token usage read from a reply, in one vocabulary across providers
-src/app.ts         Hono app: routes, auth, headers, fail-open replay
-src/events.ts      in-memory ring of route events (metadata only), replayed from the log on startup
-src/dashboard.ts   GET /dashboard and /dashboard/events; dashboard.html is the whole page, no build step
-bin/                jev-codex / jev-claude launchers (shared logic in launcher.mjs)
-scripts/mock-jev.mjs  local stand-in for Jev, for end-to-end runs without a TypeSafe key
+```bash
+pnpm install
+pnpm test         # runs against fake Jev and provider transports, no keys needed
+pnpm typecheck
+pnpm build
 ```
 
-`pnpm test` runs the suite against fake Jev and upstream transports; no keys needed.
+`scripts/mock-jev.mjs` is a local stand-in for Jev. Point `TYPESAFE_BASE_URL` at it to drive a real
+agent end to end without a TypeSafe key.
+
+```
+src/adapters/         request formats: chat.ts, responses.ts (Codex), messages.ts (Claude Code)
+src/state.ts          turns a conversation into Jev state
+src/questions.ts      turns tools into Jev questions and finds closed-set arguments
+src/decide.ts         the Jev call and the mode decision
+src/upstream.ts       streaming reverse proxy
+src/usage.ts          token usage read from a reply, normalised across providers
+src/app.ts            routes, auth, headers, and the resend-on-rejection fallback
+src/events.ts         recent request metadata kept in memory and restored from the log
+src/dashboard.ts      serves /dashboard (dashboard.html is the whole page, no build step)
+bin/                  jev-codex and jev-claude launchers (shared logic in launcher.mjs)
+scripts/mock-jev.mjs  local stand-in for Jev
+```
+
+## License
+
+MIT
