@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+### Fixed
+- Token metering now works with Codex on a ChatGPT subscription. That backend streams its replies
+  without a content-type header, so 0.2.0 read them as plain JSON and recorded no tokens at all.
+
 ## 0.2.0
 
 ### Added
