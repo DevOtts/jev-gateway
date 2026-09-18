@@ -11,6 +11,8 @@ interface ResponsesTool {
   name?: string;
   description?: string;
   parameters?: JsonSchema;
+  /** `type: "namespace"` groups tools; the group's name is part of how the model addresses them. */
+  tools?: ResponsesTool[];
 }
 
 interface InputItem {
@@ -23,6 +25,9 @@ interface InputItem {
   input?: string;
   output?: unknown;
   action?: { command?: string[] };
+  namespace?: string;
+  /** `type: "additional_tools"`: where "responses-lite" clients (Codex ≥ 0.15x) declare tools. */
+  tools?: ResponsesTool[];
 }
 
 export interface ResponsesRequest {
@@ -45,15 +50,42 @@ const HOSTED_DESCRIPTIONS: Record<string, string> = {
   file_search: "Search the user's uploaded files.",
 };
 
+/** The namespace whose tools are addressed by bare name, as top-level tools are. */
+const DEFAULT_NAMESPACE = "functions";
+
+const qualified = (namespace: string | undefined, name: string) =>
+  namespace && namespace !== DEFAULT_NAMESPACE ? `${namespace}.${name}` : name;
+
+const inputItems = (req: ResponsesRequest): InputItem[] =>
+  typeof req.input === "string" ? [{ role: "user", content: req.input }] : Array.isArray(req.input) ? req.input : [];
+
+/**
+ * Tools come from two places. Classic requests list them in `tools`; "responses-lite" ones
+ * (what Codex sends for its newer models) leave `tools` out entirely and declare them in
+ * `additional_tools` input items, grouped into namespaces.
+ */
+function declaredTools(req: ResponsesRequest): ResponsesTool[] {
+  const declared = Array.isArray(req.tools) ? [...req.tools] : [];
+  for (const item of inputItems(req)) {
+    if (item.type === "additional_tools" && Array.isArray(item.tools)) declared.push(...item.tools);
+  }
+  return declared;
+}
+
 function toTools(raw: ResponsesTool[]): RouterTool[] {
   const tools = new Map<string, RouterTool>();
-  for (const tool of raw) {
-    if ((tool.type === "function" || tool.type === "custom") && tool.name) {
-      tools.set(tool.name, {
+  const add = (tool: ResponsesTool, namespace?: ResponsesTool) => {
+    if (tool.type === "namespace") {
+      for (const nested of Array.isArray(tool.tools) ? tool.tools : []) add(nested, tool);
+    } else if ((tool.type === "function" || tool.type === "custom") && tool.name) {
+      const name = qualified(namespace?.name, tool.name);
+      const group = name === tool.name ? undefined : namespace?.description?.trim();
+      tools.set(name, {
         kind: tool.type,
-        name: tool.name,
-        description: tool.description,
+        name,
+        description: group ? `[${group}] ${tool.description ?? ""}`.trim() : tool.description,
         parameters: tool.type === "function" ? tool.parameters : undefined,
+        ...(name === tool.name ? {} : { namespace: namespace?.name }),
       });
     } else if (tool.type && !tools.has(tool.type)) {
       tools.set(tool.type, {
@@ -62,15 +94,15 @@ function toTools(raw: ResponsesTool[]): RouterTool[] {
         description: HOSTED_DESCRIPTIONS[tool.type] ?? tool.description ?? `The built-in ${tool.type} tool.`,
       });
     }
-  }
+  };
+  for (const tool of raw) add(tool);
   return [...tools.values()];
 }
 
 function toInput(req: ResponsesRequest, maxMessageChars: number): RouterInput | { skip: string } {
   // With server-side history the router would be judging a conversation it cannot see.
   if (req.previous_response_id) return { skip: "previous_response_id" };
-  const items: InputItem[] =
-    typeof req.input === "string" ? [{ role: "user", content: req.input }] : Array.isArray(req.input) ? req.input : [];
+  const items = inputItems(req);
   const clip = (value: unknown) => truncate(typeof value === "string" ? value : textOf(value), maxMessageChars);
 
   const toolNameByCallId = new Map<string, string>();
@@ -86,10 +118,11 @@ function toInput(req: ResponsesRequest, maxMessageChars: number): RouterInput | 
         turns.push({ role: item.role ?? "user", text });
       }
     } else if (type === "function_call" || type === "custom_tool_call") {
-      if (item.call_id && item.name) toolNameByCallId.set(item.call_id, item.name);
+      const name = qualified(item.namespace, item.name ?? "unknown");
+      if (item.call_id) toolNameByCallId.set(item.call_id, name);
       turns.push({
         role: "assistant",
-        tool_calls: [{ tool: item.name ?? "unknown", arguments: clip(item.arguments ?? item.input ?? "") }],
+        tool_calls: [{ tool: name, arguments: clip(item.arguments ?? item.input ?? "") }],
       });
     } else if (type === "local_shell_call") {
       if (item.call_id) toolNameByCallId.set(item.call_id, "local_shell");
@@ -111,7 +144,7 @@ function toInput(req: ResponsesRequest, maxMessageChars: number): RouterInput | 
   return {
     system: system.join("\n\n"),
     turns,
-    tools: toTools(Array.isArray(req.tools) ? req.tools : []),
+    tools: toTools(declaredTools(req)),
     toolChoice: choice === "auto" || choice === "required" ? choice : "decided",
   };
 }

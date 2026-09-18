@@ -18,6 +18,8 @@ export interface Config {
   directCalls: boolean;
   maxStateChars: number;
   maxMessageChars: number;
+  /** Opt-in: dump every routed request (decoded body, redacted headers) into this directory. */
+  debugDumpDir?: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -60,6 +62,7 @@ export function loadConfig(env: Env = process.env): Config {
     directCalls: bool(env, "JEV_DIRECT_CALLS", true),
     maxStateChars: num(env, "JEV_MAX_STATE_CHARS", 60_000),
     maxMessageChars: num(env, "JEV_MAX_MESSAGE_CHARS", 4_000),
+    debugDumpDir: str(env, "JEV_DEBUG_DUMP_DIR"),
   };
   if (config.routerApiKey && !config.upstreamApiKey) {
     throw new Error("ROUTER_API_KEY requires UPSTREAM_API_KEY (the client key is not valid upstream)");
