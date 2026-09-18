@@ -165,8 +165,8 @@ Environment (or ${ENV_FILES.at(-1)}):
     if (!response.ok) return console.error(`${spec.name}: the router refused (${response.status}). Run \`${spec.name} --stop\` and try again.`);
     return console.log(
       wanted === "on"
-        ? `${spec.name}: routing on — Jev decides again.`
-        : `${spec.name}: routing off — baseline mode: requests go straight to the LLM, tokens are still metered.`,
+        ? `${spec.name}: routing on. Jev decides again.`
+        : `${spec.name}: routing off (baseline mode). Requests go straight to the LLM, tokens are still metered.`,
     );
   }
   if (flag === "--print-config") return console.log(spec.configHelp(origin));
