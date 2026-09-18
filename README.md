@@ -249,6 +249,17 @@ Each request also logs one JSON line to stdout, or to `~/.jev-gateway/<client>.l
 - The default confidence thresholds are starting points. Use the dashboard and baseline mode to tune
   them for your own work.
 
+## Benchmark
+
+`bench/` measures whether routing pays off: the same coding task, done by a real agent, with
+routing on and off, scored by a hidden verifier. The tasks are about building, debugging and
+extending a chess rules engine. See [bench/README.md](bench/README.md).
+
+```bash
+pnpm bench:selftest
+pnpm bench -- --agent codex --tasks chess-bugfix
+```
+
 ## Development
 
 ```bash
@@ -271,7 +282,8 @@ src/usage.ts          token usage read from a reply, normalised across providers
 src/app.ts            routes, auth, headers, and the resend-on-rejection fallback
 src/events.ts         recent request metadata kept in memory and restored from the log
 src/dashboard.ts      serves /dashboard (dashboard.html is the whole page, no build step)
-bin/                  jev-codex and jev-claude launchers (shared logic in launcher.mjs)
+bin/                  jev-codex and jev-claude launchers (launcher.mjs, clients.mjs)
+bench/                benchmark runner, report and the chess tasks
 scripts/mock-jev.mjs  local stand-in for Jev
 ```
 

@@ -47,7 +47,9 @@
     "test": "vitest run",
     "codex": "node bin/jev-codex.mjs",
     "claude": "node bin/jev-claude.mjs",
-    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build",
+    "bench": "node bench/run.mjs",
+    "bench:selftest": "node bench/selftest.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",

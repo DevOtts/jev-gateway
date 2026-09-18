@@ -26,9 +26,16 @@ const ENV_FILES = [...(FROM_SOURCE ? [join(ROOT, ".env")] : []), join(STATE_DIR,
  * @param {(origin: string) => Record<string, string>} [spec.env]  extra environment for the client
  * @param {(origin: string) => string} spec.configHelp  how to wire the client up permanently
  */
-export async function runLauncher(spec) {
-  // Real environment variables win over both files.
+/** Load TYPESAFE_API_KEY and friends; real environment variables win over both files. */
+export function loadEnv() {
   for (const file of ENV_FILES) if (existsSync(file)) process.loadEnvFile(file);
+}
+
+/** How to start a gateway process from this install: `spawn(process.execPath, GATEWAY_ARGS, { cwd: ROOT })`. */
+export { ROOT, ROUTER_ARGS as GATEWAY_ARGS };
+
+export async function runLauncher(spec) {
+  loadEnv();
 
   const port = Number(process.env[spec.portEnv] ?? spec.defaultPort);
   const origin = `http://127.0.0.1:${port}`;
