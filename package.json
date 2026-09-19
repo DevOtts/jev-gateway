@@ -30,7 +30,8 @@
   },
   "bin": {
     "jev-codex": "bin/jev-codex.mjs",
-    "jev-claude": "bin/jev-claude.mjs"
+    "jev-claude": "bin/jev-claude.mjs",
+    "jev-gemini": "bin/jev-gemini.mjs"
   },
   "files": [
     "dist",
@@ -47,6 +48,7 @@
     "test": "vitest run",
     "codex": "node bin/jev-codex.mjs",
     "claude": "node bin/jev-claude.mjs",
+    "gemini": "node bin/jev-gemini.mjs",
     "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {

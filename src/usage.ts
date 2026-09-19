@@ -33,6 +33,11 @@ function merge(into: Partial<Usage>, raw: Raw): void {
     into.cacheWrite = num(raw.cache_creation_input_tokens);
     into.input = num(raw.input_tokens) + into.cached + into.cacheWrite;
     into.output = num(raw.output_tokens);
+  } else if ("promptTokenCount" in raw || "candidatesTokenCount" in raw) {
+    // Google Gemini API (usageMetadata)
+    into.input = num(raw.promptTokenCount);
+    into.output = num(raw.candidatesTokenCount);
+    into.cached = num(raw.cachedContentTokenCount);
   } else {
     // Responses API — or Anthropic's message_delta, which only updates the output count.
     if ("input_tokens" in raw) {
@@ -49,9 +54,10 @@ function merge(into: Partial<Usage>, raw: Raw): void {
 function collect(payload: unknown, into: Partial<Usage>): void {
   const root = obj(payload);
   // Where each API keeps it: top level (JSON replies, chat chunks, message_delta),
-  // `response.usage` (Responses events), `message.usage` (Anthropic message_start).
+  // `response.usage` (Responses events), `message.usage` (Anthropic message_start), `usageMetadata` (Gemini).
   for (const holder of [root, obj(root.response), obj(root.message)]) {
     if (holder.usage && typeof holder.usage === "object") merge(into, holder.usage as Raw);
+    if (holder.usageMetadata && typeof holder.usageMetadata === "object") merge(into, holder.usageMetadata as Raw);
   }
 }
 
