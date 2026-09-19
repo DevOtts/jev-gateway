@@ -11,9 +11,6 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.1
         version: 2.1.1(hono@4.13.8)
-      '@typesafe-ai/sdk':
-        specifier: ^0.6.0
-        version: 0.6.0
       hono:
         specifier: ^4.13.8
         version: 4.13.8
@@ -21,6 +18,9 @@ importers:
       '@types/node':
         specifier: ^22.20.3
         version: 22.20.3
+      '@typesafe-ai/sdk':
+        specifier: ^0.6.0
+        version: 0.6.0
       tsx:
         specifier: ^4.23.13
         version: 4.23.13

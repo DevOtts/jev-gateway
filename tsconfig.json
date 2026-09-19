@@ -7,8 +7,14 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "types": ["node"],
-    "outDir": "dist"
+    "types": [
+      "node"
+    ],
+    "outDir": "dist",
+    "resolveJsonModule": true
   },
-  "include": ["src", "test"]
+  "include": [
+    "src",
+    "test"
+  ]
 }

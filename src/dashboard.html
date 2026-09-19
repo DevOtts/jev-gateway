@@ -300,7 +300,7 @@ function renderRouters(now) {
       h("div", { class: "state" }, h("span", { class: "icon", "aria-hidden": "true" }, icon), title),
       h("div", { class: "why" }, why),
       router && source.up && routingSwitch(source),
-      router && h("div", { class: "meta" }, `→ ${router.upstream} · Jev model ${router.jevModel} · min confidence ${router.minConfidence} · up ${ago(now - Date.parse(router.startedAt))} · ${int(router.recorded)} requests logged`),
+      router && h("div", { class: "meta" }, `→ ${router.upstream} · Jev model ${router.jevModel}${router.jevProvider ? " via " + router.jevProvider : ""} · min confidence ${router.minConfidence} · up ${ago(now - Date.parse(router.startedAt))} · ${int(router.recorded)} requests logged`),
     );
   }));
 }
