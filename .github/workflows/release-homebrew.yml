@@ -1,9 +1,9 @@
-# Bump the Homebrew formula in vinilana/homebrew-tap on every published release.
+# Bump the Homebrew formula in vinilana/homebrew-tap after a release.
 #
-# Ordering matters: tag/release -> npm publish -> formula bump. npm can lag
-# behind the GitHub release (seen with 0.2.2: release existed, npm latest was
-# still 0.2.1), so this workflow waits for the npm tarball before computing
-# the SHA256 and upserting Formula/jev-gateway.rb.
+# Ordering matters: tag -> npm publish -> formula bump. release.yml calls this
+# once the version is on npm; the registry can still take a moment to serve a
+# new tarball, so this workflow polls for it before computing the SHA256 and
+# upserting Formula/jev-gateway.rb.
 #
 # Setup: create the tap repo (see docs/homebrew-tap.md), then add a
 # HOMEBREW_TAP_TOKEN secret (fine-grained PAT with contents:write on the tap
@@ -12,14 +12,30 @@
 name: release-homebrew
 
 on:
-  release:
-    types: [published]
+  # Called by release.yml once the version is on npm. A release created by a workflow does not
+  # trigger other workflows, so this cannot simply listen for `release: published`.
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to bump (e.g. v0.2.2)."
+        type: string
+        required: true
+      tap_repo:
+        type: string
+        required: false
+        default: "vinilana/homebrew-tap"
+      push_mode:
+        type: string
+        required: false
+        default: "direct-push"
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to bump (e.g. v0.2.2). Defaults to the release event tag."
-        required: false
-        default: ""
+        description: "Release tag to bump (e.g. v0.2.2)."
+        required: true
       tap_repo:
         description: "Tap repository (owner/repo)."
         required: false
@@ -58,7 +74,7 @@ jobs:
         if: steps.gate.outputs.enabled == 'true'
         id: version
         env:
-          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          TAG: ${{ inputs.tag }}
         run: |
           if [ -z "$TAG" ]; then
             echo "::error::No tag found. Publish a release or re-run with the 'tag' input (e.g. v0.2.2)."

@@ -435,6 +435,9 @@ pnpm typecheck
 pnpm build
 ```
 
+Pull requests run the same checks in CI. Releases are automatic: pushing a `vX.Y.Z` tag publishes
+to npm through trusted publishing, with no tokens involved. See [docs/releasing.md](docs/releasing.md).
+
 `scripts/mock-jev.mjs` is a local stand-in for Jev. Point `TYPESAFE_BASE_URL` at it to drive a real
 agent end to end without a TypeSafe key.
 

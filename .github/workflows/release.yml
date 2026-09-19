@@ -1,0 +1,119 @@
+# Pushing a tag vX.Y.Z publishes that version: npm first, then the GitHub release, then Homebrew.
+#
+# npm is published through trusted publishing (OIDC). There is no npm token anywhere: npm checks
+# that the request comes from this repository and from a workflow file named release.yml, and
+# GitHub proves it with a short-lived identity token. That is why the publish step lives in this
+# file and not in a reusable workflow, and why the job asks for `id-token: write`.
+# One-time setup on npmjs.com and the release steps are in docs/releasing.md.
+
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release, e.g. v0.3.0"
+        required: true
+      dry_run:
+        description: "Run every check and `npm publish --dry-run`, publish nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # the OIDC token npm trusts
+      contents: write # to create the GitHub release
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      DRY_RUN: ${{ inputs.dry_run || false }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check the tag against package.json and main
+        id: version
+        run: |
+          VERSION="${TAG#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag '$TAG' is not vX.Y.Z."; exit 1
+          fi
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "::error::Tag $TAG does not match package.json version $PACKAGE_VERSION."; exit 1
+          fi
+          # A tag on some other branch must never reach npm.
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::Tag $TAG is not on main."; exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24" # ships npm 11, which trusted publishing needs (11.5.1 or later)
+          registry-url: "https://registry.npmjs.org"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+      - name: Publish to npm
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if npm view "jev-gateway@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::jev-gateway@$VERSION is already on npm; nothing to publish."
+            exit 0
+          fi
+          # Checks and build ran above, so package scripts stay out of the step that holds the
+          # publishing identity.
+          if [ "$DRY_RUN" = "true" ]; then
+            npm publish --access public --ignore-scripts --dry-run
+          else
+            npm publish --access public --ignore-scripts
+          fi
+
+      - name: Create the GitHub release
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Release $TAG already exists."
+            exit 0
+          fi
+          # The changelog section of this version, without its heading.
+          awk -v version="$VERSION" '
+            $0 ~ "^## " { printing = ($2 == version); next }
+            printing { print }
+          ' CHANGELOG.md > notes.md
+          printf '\nInstall or upgrade: `npm install -g jev-gateway`\n' >> notes.md
+          gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+
+  homebrew:
+    needs: publish
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/release-homebrew.yml
+    with:
+      tag: ${{ needs.publish.outputs.tag }}
+    secrets: inherit

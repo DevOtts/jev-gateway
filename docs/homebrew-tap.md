@@ -53,12 +53,10 @@ homebrew-tap/
 
 ## Release ordering
 
-Tag/release → npm publish → formula bump. The workflow triggers on
-`release: published`, then **waits for the npm tarball** before computing the
-SHA256, because npm can lag behind GitHub (observed with 0.2.2: the GitHub
-release existed while npm latest was still 0.2.1). If the tarball never
-appears, the run fails with a clear error telling you to publish
-`jev-gateway@<VERSION>` to npm and re-run.
+Tag, then npm, then the GitHub release, then the formula. `release.yml` publishes the tag to npm
+and calls this workflow afterwards, so the tarball normally exists by the time it runs. It still
+polls for the tarball before computing the SHA256, because the registry can take a moment to serve
+a new version. If the tarball never appears, the run fails with an error naming the version.
 
 Manual re-run for one tag (either mode):
 
