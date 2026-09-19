@@ -50,8 +50,9 @@ jobs:
             exit 1
           fi
           VERSION="${TAG#v}"
-          if [ -z "$VERSION" ]; then
-            echo "::error::Could not derive a version from tag '$TAG'."
+          # The version ends up inside a Ruby file that Homebrew executes: accept semver only.
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag '$TAG' is not a semver version."
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -111,8 +112,10 @@ jobs:
             depends_on "node"
 
             def install
-              libexec.install Dir["*"]
-              bin.install_symlink Dir[libexec/"bin/jev-*"]
+              # The npm tarball ships dist/ but not its dependencies: without an npm install the
+              # launchers start and the gateway dies on its first import.
+              system "npm", "install", *std_npm_args
+              bin.install_symlink libexec.glob("bin/*")
             end
 
             test do
@@ -130,8 +133,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
-            echo "::error::Missing HOMEBREW_TAP_TOKEN secret. Add a PAT with contents:write on $TAP_REPO (see docs/homebrew-tap.md)."
-            exit 1
+            # Homebrew is optional: a release must not go red because the tap was never set up.
+            echo "::notice::No HOMEBREW_TAP_TOKEN secret, so the Homebrew formula was not updated. See docs/homebrew-tap.md to enable it."
+            exit 0
           fi
           TAP_DIR="$(mktemp -d)"
           if ! git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPO}.git" "$TAP_DIR"; then

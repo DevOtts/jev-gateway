@@ -3,7 +3,13 @@
 The brew install path ships the published npm tarball through a separate tap,
 `vinilana/homebrew-tap`. This repo owns the release automation
 (`.github/workflows/release-homebrew.yml`); the tap repo only holds the
-formula. No gateway behavior changes here — npm stays the primary flow.
+formula. No gateway behavior changes here: npm stays the primary flow.
+
+## Status
+
+Not live yet. The workflow is in place and does nothing until the tap repository and the
+`HOMEBREW_TAP_TOKEN` secret exist. Once the first formula has been pushed and `brew install` has
+been checked on a real machine, add the install instructions to the README.
 
 ## Quick path
 
@@ -14,7 +20,7 @@ formula. No gateway behavior changes here — npm stays the primary flow.
 
 ## Tap bootstrap
 
-The tap repo does not exist yet — create it once, deterministically:
+The tap repo does not exist yet: create it once, deterministically:
 
 ```bash
 gh repo create vinilana/homebrew-tap --public --description "Homebrew tap for jev-gateway"
@@ -71,7 +77,7 @@ gh workflow run release-homebrew.yml -f tag=v0.2.2 -f push_mode=pr
 The formula uses unversioned `depends_on "node"` and the gateway requires
 Node.js 22.15 or newer (`engines` in `package.json`). Homebrew's current
 `node` satisfies that today. Only pin to `node@22` if the tap maintainer
-prefers a versioned dependency — the default stays unversioned.
+prefers a versioned dependency: the default stays unversioned.
 
 ## Canonical formula
 
@@ -89,8 +95,8 @@ class JevGateway < Formula
   depends_on "node"
 
   def install
-    libexec.install Dir["*"]
-    bin.install_symlink Dir[libexec/"bin/jev-*"]
+    system "npm", "install", *std_npm_args
+    bin.install_symlink libexec.glob("bin/*")
   end
 
   test do
@@ -101,7 +107,7 @@ end
 ```
 
 Why this shape: the npm tarball contains `dist/` beside `bin/`, and the
-launcher runs `dist/index.js` when no `src/` checkout is present — so the
+launcher runs `dist/index.js` when no `src/` checkout is present: so the
 whole tarball goes into `libexec` and both `bin/jev-*` launchers are
 symlinked. The `test` block uses `--status`, which needs no API keys.
 
