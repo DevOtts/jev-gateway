@@ -143,7 +143,9 @@ jobs:
           cd "$TAP_DIR"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- Formula/jev-gateway.rb; then
+          # git diff alone misses untracked files, so a first-time formula would
+          # look "up to date" and never be created. Require tracked-and-clean.
+          if git ls-files --error-unmatch Formula/jev-gateway.rb >/dev/null 2>&1 && git diff --quiet -- Formula/jev-gateway.rb; then
             echo "Formula already up to date for $VERSION; nothing to push."
             exit 0
           fi
