@@ -40,7 +40,22 @@ jobs:
   bump-formula:
     runs-on: ubuntu-latest
     steps:
+      # Homebrew is optional. Decide first, so a release without a tap neither waits half an hour
+      # for npm nor goes red.
+      - name: Check that the tap is configured
+        id: gate
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "::notice::No HOMEBREW_TAP_TOKEN secret, so the Homebrew formula was not updated. See docs/homebrew-tap.md to enable it."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve version from tag
+        if: steps.gate.outputs.enabled == 'true'
         id: version
         env:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
@@ -60,6 +75,7 @@ jobs:
           echo "Resolved $TAG -> $VERSION"
 
       - name: Wait for the npm tarball
+        if: steps.gate.outputs.enabled == 'true'
         id: tarball
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -82,6 +98,7 @@ jobs:
           exit 1
 
       - name: Download tarball and compute SHA256
+        if: steps.gate.outputs.enabled == 'true'
         id: sha
         env:
           TARBALL_URL: ${{ steps.tarball.outputs.tarball_url }}
@@ -96,6 +113,7 @@ jobs:
           echo "SHA256: $SHA256"
 
       - name: Render Formula/jev-gateway.rb
+        if: steps.gate.outputs.enabled == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
           TARBALL_URL: ${{ steps.tarball.outputs.tarball_url }}
@@ -127,6 +145,7 @@ jobs:
           cat /tmp/jev-gateway.rb
 
       - name: Upsert the formula in the tap repo
+        if: steps.gate.outputs.enabled == 'true'
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
