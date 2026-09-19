@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+- **OpenCode support.** `jev-opencode` runs stable OpenCode (v1) through a gateway on port 8791,
+  injecting a provider through `OPENCODE_CONFIG_CONTENT` so nothing in your OpenCode config is
+  written. Checked against OpenCode 1.18.31. Thanks to @viniciosrab (#4).
+- **Gemini API support.** The gateway routes `POST /v1beta/models/<model>:generateContent` and
+  `:streamGenerateContent`, forcing a tool through `toolConfig.functionCallingConfig`, and
+  `jev-gemini` points the Gemini CLI at a gateway on port 8788. For clients that use a Gemini API
+  key. Unit-tested, not yet run against the real API. Thanks to @andrecodexvictor (#5).
+- **Homebrew release automation.** A workflow that updates a formula in `vinilana/homebrew-tap`
+  after each release. It does nothing until the tap and its token exist; see
+  `docs/homebrew-tap.md`. Thanks to @viniciosrab (#2).
+- Token metering understands Gemini's `usageMetadata`, streamed or not.
+
+### Fixed
+- The proxy dropped the leading `/v1` from any path that started with it, so `/v1beta/...` was
+  forwarded as `beta/...`. Only the `/v1` segment is dropped now.
+
 ## 0.2.2
 
 ### Changed
