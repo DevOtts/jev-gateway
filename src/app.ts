@@ -141,18 +141,17 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     else if (!routing) decision = { mode: "passthrough", reason: "routing_disabled" };
     else ({ decision, tools } = await decideFor(adapter, req));
 
-    const entry = { event: "route", time, path: c.req.path, model: req?.model, tools: tools ?? req?.tools?.length ?? 0 };
+    const url = new URL(c.req.url);
+    const fromUrl = adapter.fromUrl?.(url) ?? {};
+    const entry = { event: "route", time, path: c.req.path, model: req?.model ?? fromUrl.model, tools: tools ?? req?.tools?.length ?? 0 };
     if (req && decision.mode === "direct") {
       log({ ...entry, ...decision });
       const call = { tool: decision.tool, args: decision.args, inputTokens: decision.jev?.inputTokens ?? 0 };
       const headers = decisionHeaders(decision);
-      return req.stream
-        ? c.body(adapter.directStream(req, call), 200, {
-            ...headers,
-            "content-type": "text/event-stream",
-            "cache-control": "no-cache",
-          })
-        : c.json(adapter.directJson(req, call), 200, headers);
+      if (!(fromUrl.stream ?? req.stream)) return c.json(adapter.directJson(req, call), 200, headers);
+      const streamed = adapter.directStream(req, call, url);
+      if (typeof streamed !== "string") return c.body(streamed.body, 200, { ...headers, "content-type": streamed.contentType });
+      return c.body(streamed, 200, { ...headers, "content-type": "text/event-stream", "cache-control": "no-cache" });
     }
 
     if (req && decision.mode !== "passthrough") {

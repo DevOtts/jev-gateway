@@ -52,8 +52,14 @@ export interface GeminiRequest {
 /** Google Gemini API (`POST /v1beta/models/...:generateContent` and `:streamGenerateContent`). */
 function toInput(req: GeminiRequest, maxMessageChars: number): RouterInput | { skip: string } {
   if (!Array.isArray(req.contents)) return { skip: "no_messages" };
-  const rawDecls = (req.tools ?? []).flatMap((t) => t.functionDeclarations ?? []);
+  const config = req.toolConfig?.functionCallingConfig;
+  // A caller that lists allowedFunctionNames has already narrowed the choice: Jev picks among those.
+  const allowed = config?.allowedFunctionNames?.length ? new Set(config.allowedFunctionNames) : undefined;
+  const rawDecls = (req.tools ?? []).flatMap((t) => t.functionDeclarations ?? []).filter((fn) => !allowed || allowed.has(fn.name));
   if (rawDecls.length === 0) return { skip: "no_tools" };
+  // Tools Google runs itself (googleSearch, codeExecution, urlContext) are entries without
+  // declarations. Jev sees them so it isn't blind to them, but they can't be forced by name.
+  const hosted = (req.tools ?? []).flatMap((tool) => Object.keys(tool).filter((key) => key !== "functionDeclarations"));
 
   const systemParts = (req.systemInstruction?.parts ?? [])
     .map((p) => p.text)
@@ -92,18 +98,16 @@ function toInput(req: GeminiRequest, maxMessageChars: number): RouterInput | { s
     }
   }
 
-  const mode = req.toolConfig?.functionCallingConfig?.mode ?? "AUTO";
+  const mode = config?.mode ?? "AUTO";
   const toolChoice = mode === "AUTO" ? "auto" : mode === "ANY" ? "required" : "decided";
 
   return {
     system,
     turns,
-    tools: rawDecls.map((fn) => ({
-      kind: "function" as const,
-      name: fn.name,
-      description: fn.description,
-      parameters: fn.parameters,
-    })),
+    tools: [
+      ...rawDecls.map((fn) => ({ kind: "function" as const, name: fn.name, description: fn.description, parameters: fn.parameters })),
+      ...[...new Set(hosted)].map((name) => ({ kind: "hosted" as const, name, description: `Google's built-in ${name} tool.` })),
+    ],
     toolChoice,
   };
 }
@@ -151,17 +155,21 @@ function directJson(req: GeminiRequest, call: DirectCall): object {
         index: 0,
       },
     ],
-    usageMetadata: {
-      promptTokenCount: call.inputTokens,
-      candidatesTokenCount: 15,
-      totalTokenCount: call.inputTokens + 15,
-    },
+    // No LLM ran: Jev's input tokens are the whole cost, and nothing was generated.
+    usageMetadata: { promptTokenCount: call.inputTokens, candidatesTokenCount: 0, totalTokenCount: call.inputTokens },
   };
 }
 
-function directStream(req: GeminiRequest, call: DirectCall): string {
-  const json = JSON.stringify(directJson(req, call));
-  return sse([{ data: json }]);
+/** `streamGenerateContent` streams SSE only with `?alt=sse`; without it, the reply is a JSON array of chunks. */
+function directStream(req: GeminiRequest, call: DirectCall, url: URL) {
+  const chunk = JSON.stringify(directJson(req, call));
+  return url.searchParams.get("alt") === "sse" ? sse([{ data: chunk }]) : { body: `[${chunk}]`, contentType: "application/json" };
+}
+
+/** Gemini names the model and chooses streaming in the path: `/v1beta/models/<model>:streamGenerateContent`. */
+function fromUrl(url: URL) {
+  const match = /\/models\/([^/:]+):(\w+)/.exec(url.pathname);
+  return { model: match?.[1], stream: match?.[2] === "streamGenerateContent" };
 }
 
 export const geminiAdapter: Adapter<GeminiRequest> = {
@@ -169,4 +177,5 @@ export const geminiAdapter: Adapter<GeminiRequest> = {
   apply,
   directJson,
   directStream,
+  fromUrl,
 };

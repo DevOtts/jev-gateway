@@ -36,7 +36,7 @@ echo "TYPESAFE_API_KEY=your-key-here" > ~/.jev-gateway/.env
 jev-codex      # use it exactly like `codex`
 jev-claude     # use it exactly like `claude`
 jev-opencode   # use it exactly like `opencode` (stable v1)
-jev-gemini     # use it with Gemini clients
+jev-gemini     # Gemini CLI, with a Gemini API key
 ```
 
 **4. Watch it work**
@@ -156,7 +156,7 @@ That starts the gateway on `http://127.0.0.1:8791` if needed, then runs `opencod
 with a `jev-gateway` custom provider injected via `OPENCODE_CONFIG_CONTENT`. Your
 `~/.config/opencode` files are never written, and every `opencode` flag (including `-m`) forwards
 untouched. The launcher uses stable `@ai-sdk/openai-compatible`, so OpenCode speaks
-`POST /v1/chat/completions` off `http://127.0.0.1:8791/v1` by default — an endpoint the gateway
+`POST /v1/chat/completions` off `http://127.0.0.1:8791/v1` by default, an endpoint the gateway
 already routes.
 
 Manage it like the other launchers:
@@ -187,7 +187,7 @@ provider key with `UPSTREAM_API_KEY`; see "Running it as a server" below.)
 
 ### Manual setup
 
-Keep the gateway running, then point plain `opencode` at it with a file — no shell quoting needed:
+Keep the gateway running, then point plain `opencode` at it with a file, so no shell quoting is needed:
 
 ```bash
 jev-opencode --start
@@ -252,7 +252,7 @@ gateway above.
 ### Tools and routing
 
 Native OpenCode tools and MCP tools converge on the wire to `type: "function"` function tools. MCP
-naming was not captured live; the equivalence verified is the wire shape — an MCP tool arrives as
+naming was not captured live; the equivalence verified is the wire shape: an MCP tool arrives as
 the same function-tool definition a native tool does, so the gateway offers both to Jev the same
 way.
 
@@ -262,8 +262,8 @@ Expected modes (reported in `x-jev-gateway-mode`):
 | --- | --- |
 | `forced` | Jev picked a tool but some arguments are open-ended, so the LLM fills them in |
 | `none` | Jev is confident no tool is needed (`tool_choice: "none"`) |
-| `passthrough` | Low confidence, Jev failed, no tools, or the caller already decided — forwarded untouched |
-| `direct` | Jev picked a tool and every argument is an enum, boolean, or constant — answered with no LLM call |
+| `passthrough` | Low confidence, Jev failed, no tools, or the caller already decided. Forwarded untouched |
+| `direct` | Jev picked a tool and every argument is an enum, boolean, or constant. Answered with no LLM call |
 
 Most OpenCode tools take open text (`bash` takes a command, `read` takes a path), so `forced`
 is the usual outcome: Jev picks the tool and the LLM fills in the free-form arguments. `direct`
@@ -273,6 +273,19 @@ with fixed choices rather than everyday file and shell tools.
 The launcher sets `OPENCODE_EXPERIMENTAL_NATIVE_LLM=false` and
 `OPENCODE_EXPERIMENTAL_CODE_MODE=false` for the launched process only. Those experimental modes
 are outside the supported path; the stable AI SDK provider above is the supported one.
+
+## Using it with Gemini
+
+`jev-gemini` runs the Gemini CLI with `GOOGLE_GEMINI_BASE_URL` pointed at a gateway on port 8788,
+which forwards to `https://generativelanguage.googleapis.com` (override with
+`JEV_GEMINI_UPSTREAM_BASE_URL`). The gateway handles `POST /v1beta/models/<model>:generateContent`
+and `:streamGenerateContent`, forces a tool through `toolConfig.functionCallingConfig`, and
+proxies every other `/v1beta/*` path unchanged. Your API key travels as the client sent it, in the
+`x-goog-api-key` header or the `key` query parameter.
+
+This covers clients that use a **Gemini API key**. A Gemini CLI signed in with a Google account
+talks to a different Google service and does not go through the gateway. The Gemini path has unit
+tests but has not yet been run against the real API.
 
 ## Running it as a server for your own app
 

@@ -46,7 +46,9 @@ export async function forward(
   options: ForwardOptions = {},
 ): Promise<Response> {
   const url = new URL(incoming.url);
-  const target = config.upstreamBaseUrl + url.pathname.replace(/^\/v1/, "") + url.search;
+  // The upstream base already ends in its own `/v1`, so that one segment is dropped. Only that
+  // segment: Gemini's `/v1beta/...` is a different prefix and goes upstream as it came.
+  const target = config.upstreamBaseUrl + url.pathname.replace(/^\/v1(?=\/|$)/, "") + url.search;
 
   const headers = new Headers();
   incoming.headers.forEach((value, name) => {

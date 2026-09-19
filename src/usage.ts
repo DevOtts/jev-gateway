@@ -74,7 +74,8 @@ export async function readUsage(response: Response): Promise<Usage | undefined> 
   let pending = "";
   const scan = (line: string) => {
     // Most stream events are text deltas; only the few that mention usage are worth parsing.
-    if (!line.startsWith("data:") || !line.includes('"usage"')) return;
+    // (`"usage` with no closing quote also matches Gemini's `usageMetadata`.)
+    if (!line.startsWith("data:") || !line.includes('"usage')) return;
     try {
       collect(JSON.parse(line.slice(5)), found);
     } catch {

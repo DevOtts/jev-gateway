@@ -8,7 +8,10 @@ export interface Adapter<Req extends { model?: string; stream?: boolean }> {
   /** Rewrite the request so the LLM only does the part of the work Jev left for it. */
   apply(req: Req, decision: Decision, argsModel?: string): Req;
   directJson(req: Req, call: DirectCall): object;
-  directStream(req: Req, call: DirectCall): string;
+  /** The streamed form of the same answer: an SSE body, or a body with its own content type. */
+  directStream(req: Req, call: DirectCall, url: URL): string | { body: string; contentType: string };
+  /** For APIs that put the model or the choice to stream in the URL instead of the body (Gemini). */
+  fromUrl?(url: URL): { model?: string; stream?: boolean };
 }
 
 export const sse = (events: { event?: string; data: string }[]): string =>

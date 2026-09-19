@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { NO_TOOL } from "../src/questions.js";
-import { fakeJev, fakeUpstream, testConfig } from "./helpers.js";
+import { readUsage } from "../src/usage.js";
+import { fakeJev, fakeUpstream, settled, testConfig } from "./helpers.js";
 
 const geminiRequest = (extra: Record<string, unknown> = {}) => ({
   contents: [
@@ -167,5 +168,61 @@ describe("POST /v1beta/models/...:generateContent", () => {
     const decision = (await res.json()) as { mode: string; tool?: string };
     expect(decision.mode).toBe("forced");
     expect(decision.tool).toBe("shell");
+  });
+
+  it("sends /v1beta paths upstream as they came, query included", async () => {
+    const jev = fakeJev({ tool: { choice: "shell", confidence: 0.2 }, needs_tool: { noul: 0.9 } });
+    const upstream = fakeUpstream();
+    const app = createApp({
+      config: testConfig({ upstreamBaseUrl: "https://generativelanguage.googleapis.com" }),
+      askJev: jev.askJev,
+      fetch: upstream.fetchImpl,
+    });
+    await app.request("/v1beta/models/gemini-2.5-pro:generateContent?key=abc", { method: "POST", body: JSON.stringify(geminiRequest()) });
+    await app.request("/v1beta/models?pageSize=5");
+    expect(upstream.calls.map((call) => call.url)).toEqual([
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=abc",
+      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=5",
+    ]);
+  });
+
+  it("reads the model and the choice to stream from the path", async () => {
+    const noArgs = { functionDeclarations: [{ name: "list_plans", description: "List saved plans.", parameters: { type: "object", properties: {} } }] };
+    const canned = { tool: { choice: "list_plans" }, needs_tool: { noul: 0.9 } };
+    const direct = async (path: string) => {
+      const app = createApp({ config: testConfig(), askJev: fakeJev(canned).askJev, fetch: fakeUpstream().fetchImpl });
+      const res = await app.request(path, { method: "POST", body: JSON.stringify(geminiRequest({ tools: [noArgs] })) });
+      await settled();
+      const feed = (await (await app.request("/dashboard/events")).json()) as { events: { model?: string }[] };
+      return { type: res.headers.get("content-type"), text: await res.text(), model: feed.events[0]?.model };
+    };
+
+    const sse = await direct("/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse");
+    expect(sse.type).toContain("text/event-stream");
+    expect(JSON.parse(sse.text.replace(/^data: /, "")).candidates[0].content.parts[0].functionCall.name).toBe("list_plans");
+    expect(sse.model).toBe("gemini-2.5-pro");
+
+    const array = await direct("/v1beta/models/gemini-2.5-pro:streamGenerateContent");
+    expect(array.type).toContain("application/json");
+    expect(JSON.parse(array.text)[0].usageMetadata).toEqual({ promptTokenCount: 123, candidatesTokenCount: 0, totalTokenCount: 123 });
+
+    expect((await direct("/v1beta/models/gemini-2.5-pro:generateContent")).type).toContain("application/json");
+  });
+
+  it("offers Google-run tools to Jev without forcing them, and respects allowedFunctionNames", async () => {
+    const two = { functionDeclarations: [{ name: "shell", description: "Runs a shell command." }, { name: "read_file", description: "Reads a file." }] };
+    const hosted = setup({ tool: { choice: "googleSearch" }, needs_tool: { noul: 0.9 } });
+    const res = await hosted.post(geminiRequest({ tools: [two, { googleSearch: {} }] }));
+    expect(res.headers.get("x-jev-gateway-reason")).toBe("hosted_tool_selected");
+
+    const narrowed = setup({ tool: { choice: "read_file" }, needs_tool: { noul: 0.9 } });
+    await narrowed.post(geminiRequest({ tools: [two], toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["read_file"] } } }));
+    const question = narrowed.jev.requests[0]!.questions.tool!;
+    expect(question.type === "choice" && Object.keys(question.criteria)).toEqual(["read_file"]);
+  });
+
+  it("meters a streamed Gemini reply", async () => {
+    const body = `data: ${JSON.stringify({ candidates: [], usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, cachedContentTokenCount: 64 } })}\n\n`;
+    expect(await readUsage(new Response(body))).toMatchObject({ input: 100, output: 20, cached: 64 });
   });
 });
