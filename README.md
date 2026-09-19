@@ -256,19 +256,24 @@ a real coding agent does the same task with routing on and off, the gateway mete
 and a hidden verifier scores the result. The tasks are about building, debugging and extending a
 chess rules engine.
 
-Results so far, from 40 agent sessions (two chess tasks, five runs per mode, agents run clean with
-no MCP servers or plugins), every one of which passed all hidden checks:
+Results so far, from 120 agent sessions: six models, two chess tasks, five runs per mode, agents
+run clean with no MCP servers or plugins. Medians with routing on, compared with the same model
+without it:
 
-| Medians, routing on vs. off | Output tokens | Input tokens | Wall-clock time |
-| --- | ---: | ---: | ---: |
-| Codex, fixing bugs | -57% | -7% | -39% |
-| Codex, adding a feature | 0% | +2% | +8% |
-| Claude Code (Fable 5.1), fixing bugs | -13% | -19% | +6% |
-| Claude Code (Fable 5.1), adding a feature | -24% | -27% | -26% |
+| | Fixing bugs: output / input tokens / time | Adding a feature: output / input tokens / time |
+| --- | ---: | ---: |
+| GPT-6 Astra (Codex) | -57% / -7% / -39% | 0% / +2% / +8% |
+| GPT-5.6 Sol (Codex) | -57% / -40% / -36% | -9% / -39% / -16% |
+| GPT-5.6 Luna (Codex) | -12% / -10% / +10% | -14% / -51% / -14% |
+| Fable 5.1 (Claude Code) | -13% / -19% / +6% | -24% / -27% / -26% |
+| Opus 5 (Claude Code) | -7% / -22% / +2% | +22% / +61% / +83% |
+| Sonnet 5 (Claude Code) | -41% / -48% / -25% | +9% / +16% / +37% |
 
-Routing pays off most where an agent's turns are mechanical, and costs a little where there is
-nothing to save. Five runs per cell is still a small sample: the chart, the spread of the
-individual runs, the raw data and how to run it yourself are in that repository.
+Routing pays off when debugging, for every model. On the feature task it helped some models and
+made Opus 5 and Sonnet 5 clearly worse, and GPT-5.6 Luna got cheaper but less often right (3 of 5
+runs solved, against 5 of 5 without routing). Measure on your own work before trusting it: five
+runs per cell is a small sample. The chart, the spread of the individual runs, the raw data, how
+one run was caught copying from another, and how to run it yourself are in that repository.
 
 ## Development
 
