@@ -5,8 +5,9 @@ the gateway asks [Jev](https://docs.typesafe.ai/introduction), TypeSafe's fast d
 instead of leaving that choice to the expensive reasoning model. Everything else goes to your usual
 LLM untouched.
 
-It works with **Codex**, **Claude Code**, and stable **OpenCode** out of the box, including on
-ChatGPT and claude.ai subscriptions, and with any client that speaks the OpenAI or Anthropic APIs.
+It works with **Codex**, **Claude Code** and **OpenCode** out of the box, including on ChatGPT and
+claude.ai subscriptions, with Gemini API clients, and with any client that speaks the OpenAI,
+Anthropic or Google Gemini APIs.
 
 > Independent project, not affiliated with or endorsed by TypeSafe. "Jev" is TypeSafe's model and
 > this gateway is a client of its public API.
@@ -35,6 +36,7 @@ echo "TYPESAFE_API_KEY=your-key-here" > ~/.jev-gateway/.env
 jev-codex      # use it exactly like `codex`
 jev-claude     # use it exactly like `claude`
 jev-opencode   # use it exactly like `opencode` (stable v1)
+jev-gemini     # use it with Gemini clients
 ```
 
 **4. Watch it work**
@@ -62,7 +64,7 @@ before. Only sessions started with the `jev-` commands go through the gateway.
 
 ## Commands
 
-All of these work with `jev-codex`, `jev-claude`, and `jev-opencode`.
+All of these work with `jev-codex`, `jev-claude`, `jev-opencode` and `jev-gemini`.
 
 | Command | What it does |
 | --- | --- |
@@ -77,8 +79,8 @@ All of these work with `jev-codex`, `jev-claude`, and `jev-opencode`.
 | `jev-codex --print-config` | Print settings to point plain `codex` at the gateway permanently |
 | `jev-codex --gateway-help` | List all of the above |
 
-Codex uses port 8790, Claude Code uses port 8789, and OpenCode uses port 8791. Change them with
-`JEV_CODEX_PORT`, `JEV_CLAUDE_PORT`, and `JEV_OPENCODE_PORT`.
+Codex uses port 8790, Claude Code 8789, OpenCode 8791 and Gemini clients 8788. Change them with
+`JEV_CODEX_PORT`, `JEV_CLAUDE_PORT`, `JEV_OPENCODE_PORT` and `JEV_GEMINI_PORT`.
 
 ## Dashboard
 
@@ -289,13 +291,14 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8787/v1")  # your usual provider key still works
 ```
 
-The gateway routes three endpoints and proxies every other `/v1/*` path unchanged:
+The gateway routes four endpoints and proxies every other `/v1/*` or `/v1beta/*` path unchanged:
 
 | Endpoint | API |
 | --- | --- |
 | `POST /v1/chat/completions` | OpenAI Chat Completions |
 | `POST /v1/responses` | OpenAI Responses |
 | `POST /v1/messages` | Anthropic Messages |
+| `POST /v1beta/models/*` | Google Gemini API (`generateContent`, `streamGenerateContent`) |
 
 By default your client's own `Authorization` header is forwarded to the provider. Set
 `UPSTREAM_API_KEY` to have the gateway hold the provider key instead, and `ROUTER_API_KEY` to
@@ -423,7 +426,7 @@ pnpm build
 agent end to end without a TypeSafe key.
 
 ```
-src/adapters/         request formats: chat.ts, responses.ts (Codex), messages.ts (Claude Code)
+src/adapters/         request formats: chat.ts, responses.ts (Codex), messages.ts (Claude Code), gemini.ts (Gemini)
 src/state.ts          turns a conversation into Jev state
 src/questions.ts      turns tools into Jev questions and finds closed-set arguments
 src/decide.ts         the Jev call and the mode decision
@@ -432,7 +435,7 @@ src/usage.ts          token usage read from a reply, normalised across providers
 src/app.ts            routes, auth, headers, and the resend-on-rejection fallback
 src/events.ts         recent request metadata kept in memory and restored from the log
 src/dashboard.ts      serves /dashboard (dashboard.html is the whole page, no build step)
-bin/                  jev-codex, jev-claude, and jev-opencode launchers (launcher.mjs, clients.mjs)
+bin/                  jev-codex, jev-claude, jev-opencode and jev-gemini launchers (launcher.mjs, clients.mjs)
 scripts/mock-jev.mjs  local stand-in for Jev
 ```
 

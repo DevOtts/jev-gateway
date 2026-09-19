@@ -140,3 +140,20 @@ export const opencode = {
     );
   },
 };
+export const gemini = {
+  name: "jev-gemini",
+  client: "gemini",
+  portEnv: "JEV_GEMINI_PORT",
+  defaultPort: 8788,
+  upstream: () => process.env.JEV_GEMINI_UPSTREAM_BASE_URL ?? "https://generativelanguage.googleapis.com",
+  upstreamHelp: "JEV_GEMINI_UPSTREAM_BASE_URL   where Gemini traffic goes (default https://generativelanguage.googleapis.com)",
+  env: (origin) => ({
+    GEMINI_API_BASE: origin,
+    GOOGLE_GEMINI_BASE_URL: origin,
+  }),
+  configHelp: (origin) =>
+    `# Point your Gemini client or SDK at:\n` +
+    `#   GEMINI_API_BASE=${origin}\n` +
+    `#   or endpoint: ${origin}/v1beta\n`,
+};
+
