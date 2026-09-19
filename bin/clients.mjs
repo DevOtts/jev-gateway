@@ -1,5 +1,5 @@
 // How each coding agent is pointed at a gateway. Shared by the launchers and the benchmark runner,
-// so a benchmark drives an agent exactly the way `jev-codex` and `jev-claude` do.
+// so a benchmark drives an agent exactly the way `jev-codex`, `jev-claude`, and `jev-opencode` do.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -86,7 +86,10 @@ const OPENCODE_PROVIDER = "jev-gateway";
  * are never written. `@ai-sdk/openai-compatible` speaks `/v1/chat/completions` off
  * `${origin}/v1`, an endpoint the gateway already routes. `{env:OPENAI_API_KEY}` reuses the
  * user's own OpenAI credential untouched (resolving to empty when unset, like OpenCode's own
- * local-provider examples); with UPSTREAM_API_KEY set, the gateway swaps in its key instead.
+ * local-provider examples). The launcher-spawned gateway forwards that client credential
+ * untouched: launcher.mjs strips UPSTREAM_API_KEY/ROUTER_API_KEY by design, so no gateway
+ * key swap applies here. TYPESAFE_API_KEY is separate — it only authorizes the Jev
+ * tool-selection call and is never sent as the LLM upstream credential.
  */
 function opencodeInlineConfig(origin) {
   const model = opencodeModel();
@@ -124,12 +127,14 @@ export const opencode = {
     OPENCODE_EXPERIMENTAL_CODE_MODE: "false",
   }),
   configHelp: (origin) => {
+    // No OPENCODE_CONFIG_CONTENT one-liner here: single-quoting raw JSON breaks when a custom
+    // model ID contains an apostrophe. The opencode.json file workflow below needs no shell
+    // quoting and matches what `jev-opencode --print-config` documents.
     const config = opencodeInlineConfig(origin);
     const manual = JSON.stringify({ model: config.model, small_model: config.small_model, provider: config.provider }, null, 2);
     return (
-      `# Keep the gateway running (jev-opencode --start), then either run:\n` +
-      `#   OPENCODE_CONFIG_CONTENT='${JSON.stringify(config)}' opencode\n` +
-      `# or add to opencode.json (project root or ~/.config/opencode/opencode.json):\n` +
+      `# Keep the gateway running (jev-opencode --start), then add to opencode.json\n` +
+      `# (project root or ~/.config/opencode/opencode.json):\n` +
       `${manual}\n` +
       `# then select it with: opencode --model ${config.model}`
     );

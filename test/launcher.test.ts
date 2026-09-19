@@ -107,11 +107,30 @@ describe("jev-opencode spec", () => {
     const help = opencode.configHelp(origin);
     expect(help).toContain(`${origin}/v1`);
     expect(help).toContain("jev-gateway/gpt-5");
-    expect(help).toContain("OPENCODE_CONFIG_CONTENT");
+    expect(help).toContain("opencode.json");
     expect(help).toContain("jev-opencode --start");
     expect(help).toContain("--model jev-gateway/gpt-5");
+    // The file workflow below needs no shell quoting; the JSON block must parse as-is.
+    const jsonBlock = help.slice(help.indexOf("{"), help.lastIndexOf("}") + 1);
+    const parsed = JSON.parse(jsonBlock) as any;
+    expect(parsed.model).toBe("jev-gateway/gpt-5");
+    expect(parsed.provider["jev-gateway"].options.baseURL).toBe(`${origin}/v1`);
+    // No raw-JSON shell one-liner: single-quoting breaks on apostrophes in custom model IDs.
+    expect(help).not.toContain("OPENCODE_CONFIG_CONTENT='");
     process.env.JEV_OPENCODE_MODEL = "other-model";
     expect(opencode.configHelp(origin)).toContain("jev-gateway/other-model");
+  });
+
+  it("stays safe when a custom model ID contains an apostrophe", () => {
+    process.env.JEV_OPENCODE_MODEL = "o'brien";
+    const config = inlineConfig();
+    expect(config.model).toBe("jev-gateway/o'brien");
+    expect(Object.keys(config.provider["jev-gateway"].models)).toEqual(["o'brien"]);
+    const help = opencode.configHelp(origin);
+    expect(help).not.toContain("OPENCODE_CONFIG_CONTENT='");
+    const jsonBlock = help.slice(help.indexOf("{"), help.lastIndexOf("}") + 1);
+    expect(() => JSON.parse(jsonBlock)).not.toThrow();
+    expect((JSON.parse(jsonBlock) as any).model).toBe("jev-gateway/o'brien");
   });
 });
 
