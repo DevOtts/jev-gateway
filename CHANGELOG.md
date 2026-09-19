@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.1
+
+First version published by the release workflow. It carries everything listed under 0.3.0, which
+was tagged but never reached npm.
+
+### Changed
+- Releases are automatic: pushing a `vX.Y.Z` tag publishes to npm through trusted publishing
+  (OIDC), with provenance and without tokens, then creates the GitHub release. See
+  `docs/releasing.md`.
+- Pull requests and pushes to `main` run the type check, the tests and the build in CI, on Node
+  22.15 and 24.
+
+### Fixed
+- The Homebrew workflow checks for its token before anything else, instead of polling npm for half
+  an hour and then failing when no tap is configured.
+
 ## 0.3.0
 
 ### Added
