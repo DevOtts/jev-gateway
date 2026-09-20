@@ -166,8 +166,8 @@ says the same to users.
    add a setting.
 4. **Leave `version` in `package.json` and `CHANGELOG.md` alone.** release-please writes both
    from commit messages, in a release pull request of its own.
-5. Give the pull request a conventional title (next section). Pull requests are squash-merged, so
-   the title becomes the commit on `main`, and from there a line in the changelog.
+5. Give the pull request a conventional title (next section). The title reaches `main` however
+   the pull request is merged, and from there becomes a line in the changelog.
 6. Make sure the checks pass. CI must be green before a merge.
 
 For anything large (a new mode, a change to how decisions are made, a new runtime dependency),
@@ -203,9 +203,11 @@ feat!: listen on loopback only                                   good, and flags
 Update launcher                                                  no type: invisible to the release
 ```
 
-Explain the why in the body when the diff does not. Within a pull request's branch, commit however
-you like; only the title survives the squash. Maintainers committing straight to `main` follow
-the same format. How these become a release is in [docs/releasing.md](docs/releasing.md).
+Explain the why in the body when the diff does not. Squashing is preferred, and then only the
+title survives: commit however you like within the branch. When a pull request is merged with a
+merge commit instead, its commits land on `main` too, and each conventional one gets a changelog
+line of its own next to the title's, so keep them as well-formed as the title. Maintainers
+committing straight to `main` follow the same format. How these become a release is in [docs/releasing.md](docs/releasing.md).
 
 ## Code style
 
