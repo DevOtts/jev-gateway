@@ -1,20 +1,26 @@
-# Pushing a tag vX.Y.Z publishes that version: npm first, then the GitHub release, then Homebrew.
+# Releases are driven by release-please, and everything happens in this one file.
+#
+# Every push to main runs the `release-please` job. It reads the conventional commits that landed
+# since the last release and keeps a "release X.Y.Z" pull request open with the version bump and
+# the changelog. Merging that pull request is the release: the same job then creates the tag and
+# the GitHub release, and `publish` sends that tag to npm, then Homebrew.
 #
 # npm is published through trusted publishing (OIDC). There is no npm token anywhere: npm checks
 # that the request comes from this repository and from a workflow file named release.yml, and
-# GitHub proves it with a short-lived identity token. That is why the publish step lives in this
-# file and not in a reusable workflow, and why the job asks for `id-token: write`.
+# GitHub proves it with a short-lived identity token. That is why release-please and the publish
+# step both live in this file: a tag created with GITHUB_TOKEN starts no other workflow, and a
+# publish step called from another workflow file would not match what npm trusts.
 # One-time setup on npmjs.com and the release steps are in docs/releasing.md.
 
 name: release
 
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to release, e.g. v0.3.0"
+        description: "Existing tag to release again, e.g. v0.3.0"
         required: true
       dry_run:
         description: "Run every check and `npm publish --dry-run`, publish nothing"
@@ -24,25 +30,48 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 jobs:
+  release-please:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the release commit on the pull request branch, the tag, the GitHub release
+      pull-requests: write # the release pull request
+      issues: write # the autorelease labels
+    # Two runs must not groom the same pull request at once. A run that is displaced while it
+    # waits loses nothing: the next one finds the merged release pull request and tags it.
+    concurrency:
+      group: release-please
+      cancel-in-progress: false
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # Configured by release-please-config.json and .release-please-manifest.json.
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+
   publish:
+    needs: release-please
+    # On a push, only when release-please has just cut a release. By hand, always: release-please
+    # is skipped then, and a skipped dependency would otherwise skip this job too.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write # the OIDC token npm trusts
-      contents: write # to create the GitHub release
+      contents: write # to create the GitHub release when it does not exist yet
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
     outputs:
       tag: ${{ steps.version.outputs.tag }}
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ inputs.tag || needs.release-please.outputs.tag }}
       DRY_RUN: ${{ inputs.dry_run || false }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || needs.release-please.outputs.tag }}
           fetch-depth: 0
 
       - name: Check the tag against package.json and main
@@ -98,13 +127,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # release-please has normally created it already. This covers a tag made by hand.
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "::notice::Release $TAG already exists."
             exit 0
           fi
-          # The changelog section of this version, without its heading.
+          # The changelog section of this version, without its heading: "## 0.3.1" as written by
+          # hand, or "## [0.3.2](compare link) (date)" as release-please writes it.
           awk -v version="$VERSION" '
-            $0 ~ "^## " { printing = ($2 == version); next }
+            $0 ~ "^## " { printing = ($2 == version || index($2, "[" version "]") == 1); next }
             printing { print }
           ' CHANGELOG.md > notes.md
           printf '\nInstall or upgrade: `npm install -g jev-gateway`\n' >> notes.md
@@ -112,7 +143,8 @@ jobs:
 
   homebrew:
     needs: publish
-    if: ${{ !inputs.dry_run }}
+    # Spelled out because release-please, further up the chain, is skipped on a run by hand.
+    if: ${{ !cancelled() && needs.publish.result == 'success' && !inputs.dry_run }}
     uses: ./.github/workflows/release-homebrew.yml
     with:
       tag: ${{ needs.publish.outputs.tag }}
