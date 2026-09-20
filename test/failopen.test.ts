@@ -112,3 +112,44 @@ describe("tool names", () => {
     expect(sent.match(/<system-reminder>/g)).toHaveLength(1);
   });
 });
+
+describe("Chat Completions tools that are not functions", () => {
+  const chat = (extraTools: unknown[]) => ({
+    model: "m",
+    messages: [{ role: "user", content: "weather in Paris?" }],
+    // get_weather alone: it has no closed-set arguments for the fake Jev to be asked about.
+    tools: [tools[0], ...extraTools],
+  });
+
+  it("routes among the functions and leaves the built-in in the list", async () => {
+    const { post, jev, upstream } = setup();
+    const response = await post("/v1/chat/completions", chat([{ type: "web_search" }]));
+    await settled();
+    expect(response.headers.get("x-jev-gateway-mode")).toBe("forced");
+    expect(offered(jev)).toContain("web_search");
+    expect(upstream.calls[0]!.body.tool_choice).toEqual({ type: "function", function: { name: "get_weather" } });
+    expect(upstream.calls[0]!.body.tools).toContainEqual({ type: "web_search" });
+  });
+
+  it("lets the LLM decide when Jev picks the built-in, which cannot be forced by name", async () => {
+    const { post, upstream } = setup({ tool: { choice: "web_search" }, needs_tool: { noul: 0.97 } });
+    const body = chat([{ type: "web_search" }]);
+    const response = await post("/v1/chat/completions", body);
+    await settled();
+    expect(response.headers.get("x-jev-gateway-reason")).toBe("hosted_tool_selected");
+    expect(upstream.calls[0]!.body).toEqual(body);
+  });
+
+  it("offers a custom tool under its own name", async () => {
+    const { post, jev } = setup();
+    await post("/v1/chat/completions", chat([{ type: "custom", custom: { name: "run_sql", description: "Run a SQL query." } }]));
+    expect(offered(jev)).toContain("run_sql");
+  });
+
+  it("still leaves a function without a name to upstream", async () => {
+    const { post, jev } = setup();
+    const response = await post("/v1/chat/completions", chat([{ type: "function" }]));
+    expect(response.headers.get("x-jev-gateway-reason")).toBe("malformed_tools");
+    expect(jev.requests).toHaveLength(0);
+  });
+});
