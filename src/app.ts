@@ -114,11 +114,25 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     })();
   };
 
-  /** The decision, plus how many tools the adapter found — they aren't always in `req.tools`. */
-  const decideFor = async <Req extends AnyRequest>(adapter: Adapter<Req>, req: Req) => {
-    const input = adapter.toInput(req, config.maxMessageChars);
-    if ("skip" in input) return { decision: { mode: "passthrough", reason: input.skip } as Decision, tools: undefined };
-    return { decision: await decide(input, config, askJev), tools: input.tools.length };
+  /**
+   * The decision, plus how many tools the adapter found — they aren't always in `req.tools`.
+   * Adapters read the request as the shape its API documents, and a body can be valid JSON without
+   * being that shape (`"messages": [null]`). Whatever that makes them throw is not a reason to
+   * fail the request: upstream gets to answer it, with its own error when it deserves one.
+   */
+  const decideFor = async <Req extends AnyRequest>(adapter: Adapter<Req>, req: Req): Promise<{ decision: Decision; tools?: number }> => {
+    let input: ReturnType<Adapter<Req>["toInput"]>;
+    try {
+      input = adapter.toInput(req, config.maxMessageChars);
+    } catch {
+      return { decision: { mode: "passthrough", reason: "unreadable_request" } };
+    }
+    if ("skip" in input) return { decision: { mode: "passthrough", reason: input.skip } };
+    try {
+      return { decision: await decide(input, config, askJev), tools: input.tools.length };
+    } catch (error) {
+      return { decision: { mode: "passthrough", reason: `router_error: ${error instanceof Error ? error.message : String(error)}` }, tools: input.tools.length };
+    }
   };
 
   const route = <Req extends AnyRequest>(adapter: Adapter<Req>) => async (c: Context) => {
@@ -144,18 +158,39 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     const url = new URL(c.req.url);
     const fromUrl = adapter.fromUrl?.(url) ?? {};
     const entry = { event: "route", time, path: c.req.path, model: req?.model ?? fromUrl.model, tools: tools ?? req?.tools?.length ?? 0 };
+    // Building an answer or a rewrite is the gateway's own work. If it breaks, the original
+    // request still goes upstream: the router must never be the reason a request fails.
+    const giveUp = (error: unknown): Decision => ({
+      mode: "passthrough",
+      reason: `router_error: ${error instanceof Error ? error.message : String(error)}`,
+      jev: decision.jev,
+    });
+
     if (req && decision.mode === "direct") {
-      log({ ...entry, ...decision });
-      const call = { tool: decision.tool, args: decision.args, inputTokens: decision.jev?.inputTokens ?? 0 };
-      const headers = decisionHeaders(decision);
-      if (!(fromUrl.stream ?? req.stream)) return c.json(adapter.directJson(req, call), 200, headers);
-      const streamed = adapter.directStream(req, call, url);
-      if (typeof streamed !== "string") return c.body(streamed.body, 200, { ...headers, "content-type": streamed.contentType });
-      return c.body(streamed, 200, { ...headers, "content-type": "text/event-stream", "cache-control": "no-cache" });
+      try {
+        const call = { tool: decision.tool, args: decision.args, inputTokens: decision.jev?.inputTokens ?? 0 };
+        const headers = decisionHeaders(decision);
+        const streamed = (fromUrl.stream ?? req.stream) ? adapter.directStream(req, call, url) : undefined;
+        const json = streamed === undefined ? adapter.directJson(req, call) : undefined;
+        log({ ...entry, ...decision });
+        if (streamed === undefined) return c.json(json, 200, headers);
+        if (typeof streamed !== "string") return c.body(streamed.body, 200, { ...headers, "content-type": streamed.contentType });
+        return c.body(streamed, 200, { ...headers, "content-type": "text/event-stream", "cache-control": "no-cache" });
+      } catch (error) {
+        decision = giveUp(error);
+      }
     }
 
+    let rewritten: Req | undefined;
     if (req && decision.mode !== "passthrough") {
-      const rewritten = adapter.apply(req, decision, config.argsModel);
+      try {
+        rewritten = adapter.apply(req, decision, config.argsModel);
+      } catch (error) {
+        decision = giveUp(error);
+      }
+    }
+
+    if (rewritten && decision.mode !== "passthrough") {
       const body = JSON.stringify(rewritten);
       const response = await forward(c.req.raw, config, fetchImpl, { body, responseHeaders: decisionHeaders(decision) });
       const sent = { mode: decision.mode, model: rewritten.model, tool_choice: (rewritten as { tool_choice?: unknown }).tool_choice };

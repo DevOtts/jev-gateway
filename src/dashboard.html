@@ -171,6 +171,9 @@ const REASONS = {
   no_messages: ["Jev not asked", "The request had no conversation to decide on."],
   previous_response_id: ["Jev not asked", "The conversation lives upstream (previous_response_id); the router can't see it."],
   non_function_tools: ["Jev not asked", "The roster has tools that aren't plain functions."],
+  malformed_tools: ["Jev not asked", "A tool in the roster has no name or no type; upstream gets to reject it."],
+  unsafe_tool_name: ["Jev not asked", "A tool's name has spaces, quotes or brackets in it. No provider accepts such a name, and the router won't repeat it to a model."],
+  unreadable_request: ["Jev not asked", "The body was JSON but not the shape this API documents; upstream gets to reject it."],
   too_many_tools: ["Jev not asked", "The tool roster is larger than the router can shortlist."],
   duplicate_tool_names: ["Jev not asked", "Two tools share a name."],
   reserved_tool_name: ["Jev not asked", "A tool is named no_tool_needed, which the router reserves."],
@@ -187,6 +190,7 @@ const REASONS = {
   upstream_rejected: ["Jev asked", "Upstream refused the rewritten request; the original was replayed."],
   jev_error: ["Jev failed", "The Jev call errored or timed out. Check TYPESAFE_API_KEY and the network."],
   jev_unexpected_answer: ["Jev failed", "Jev's reply didn't contain the expected answers."],
+  router_error: ["Router failed", "The router hit a bug of its own and sent the original request on. Please report the reason shown in the log."],
 };
 
 const params = new URLSearchParams(location.search);
@@ -215,7 +219,7 @@ function h(tag, attrs, ...children) {
   return node;
 }
 
-const reasonKey = (reason) => (reason.startsWith("jev_error") ? "jev_error" : reason.startsWith("upstream_rejected") ? "upstream_rejected" : reason);
+const reasonKey = (reason) => ["jev_error", "router_error", "upstream_rejected"].find((prefix) => reason.startsWith(prefix)) ?? reason;
 const failed = (event) => event.mode === "passthrough" && (REASONS[reasonKey(event.reason ?? "")] ?? [])[0] === "Jev failed";
 const category = (event) => (failed(event) ? "failed" : event.mode);
 const routed = (event) => event.mode !== "passthrough";
