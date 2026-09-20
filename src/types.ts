@@ -38,6 +38,8 @@ export interface ToolDef {
     description?: string;
     parameters?: JsonSchema;
   };
+  /** `type: "custom"`: free-form input instead of JSON arguments. */
+  custom?: { name: string; description?: string };
 }
 
 export type ToolChoice =

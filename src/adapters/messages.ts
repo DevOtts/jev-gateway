@@ -103,7 +103,9 @@ function toInput(req: MessagesRequest, maxMessageChars: number): RouterInput | {
 /**
  * Suggest Jev's pick in a block appended after everything the client sent. Cache breakpoints sit
  * on the client's own blocks, so the cached prefix stays byte-identical to what the client will
- * resend next turn; the wording leaves the model free to disagree.
+ * resend next turn; the wording leaves the model free to disagree. The name goes into a block
+ * the model takes for the host's, which is safe only because `decide` refuses any name that is
+ * not a single inert token (SAFE_TOOL_NAME) before a decision can carry it here.
  */
 function withHint(req: MessagesRequest, tool: string): MessagesRequest {
   const messages = req.messages ?? [];

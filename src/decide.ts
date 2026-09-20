@@ -45,11 +45,21 @@ export type Decision = { jev?: JevTrace } & (
 
 type Answers = SystemOneResult<Questions>["answers"];
 
+/**
+ * A tool's name is whatever the client sent, and the client got it from wherever its tools come
+ * from: an MCP server, a plugin, a package. The gateway offers it to Jev as an option and, in
+ * `hint` mode, writes it into text the LLM reads as the host's. So it must stay one inert token,
+ * with no whitespace, quotes or angle brackets to break out of either with. The providers' own
+ * rules for names are at least this strict: a request that fails here is theirs to refuse.
+ */
+const SAFE_TOOL_NAME = /^[\p{L}\p{N}_.:/-]{1,128}$/u;
+
 /** Why a request is not Jev's to decide, or undefined when it is. */
 function skipReason(input: RouterInput): string | undefined {
   if (input.turns.length === 0) return "no_messages";
   if (input.tools.length === 0) return "no_tools";
   if (input.tools.length > MAX_TOOLS * 255) return "too_many_tools";
+  if (input.tools.some((tool) => typeof tool.name !== "string" || !SAFE_TOOL_NAME.test(tool.name))) return "unsafe_tool_name";
   if (new Set(input.tools.map((tool) => tool.name)).size !== input.tools.length) return "duplicate_tool_names";
   if (input.tools.some((tool) => tool.name === NO_TOOL)) return "reserved_tool_name";
   if (input.toolChoice === "decided") return "tool_choice_already_decided";

@@ -1,15 +1,42 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Decision } from "../decide.js";
 import { textOf, truncate } from "../state.js";
-import type { ChatRequest, DirectCall, RouterInput, Turn } from "../types.js";
+import type { ChatRequest, DirectCall, RouterInput, RouterTool, ToolDef, Turn } from "../types.js";
 import { sse, type Adapter } from "./adapter.js";
 
 /** OpenAI Chat Completions (`POST /v1/chat/completions`). */
 
+/**
+ * Tools that are not functions (a provider's built-ins, custom tools) cannot be forced through
+ * `tool_choice: { type: "function" }`. They are still offered to Jev, so it is not blind to them:
+ * picking one passes the request through, and picking a function leaves them in the list untouched.
+ */
+function toTools(rawTools: ToolDef[]): RouterTool[] {
+  const tools: RouterTool[] = [];
+  const builtIns = new Set<string>();
+  for (const tool of rawTools) {
+    if (tool.type === "function") {
+      const { name, description, parameters } = tool.function!;
+      tools.push({ kind: "function", name, description, parameters });
+    } else if (tool.custom?.name) {
+      tools.push({ kind: "hosted", name: tool.custom.name, description: tool.custom.description });
+    } else if (!builtIns.has(tool.type)) {
+      // The same built-in listed twice is one option; two functions with one name stay two, so
+      // that `decide` can refuse the ambiguity.
+      builtIns.add(tool.type);
+      tools.push({ kind: "hosted", name: tool.type, description: `The provider's built-in ${tool.type} tool.` });
+    }
+  }
+  return tools;
+}
+
 function toInput(req: ChatRequest, maxMessageChars: number): RouterInput | { skip: string } {
   if (!Array.isArray(req.messages)) return { skip: "no_messages" };
   const rawTools = Array.isArray(req.tools) ? req.tools : [];
-  if (rawTools.some((tool) => tool.type !== "function" || !tool.function?.name)) return { skip: "non_function_tools" };
+  // A function with no name is a body upstream will refuse; it is not ours to guess at.
+  if (rawTools.some((tool) => tool.type === "function" ? !tool.function?.name : typeof tool.type !== "string")) {
+    return { skip: "malformed_tools" };
+  }
 
   const toolNameByCallId = new Map<string, string>();
   for (const message of req.messages) {
@@ -46,12 +73,7 @@ function toInput(req: ChatRequest, maxMessageChars: number): RouterInput | { ski
   return {
     system: system.join("\n\n"),
     turns,
-    tools: rawTools.map((tool) => ({
-      kind: "function",
-      name: tool.function!.name,
-      description: tool.function!.description,
-      parameters: tool.function!.parameters,
-    })),
+    tools: toTools(rawTools),
     toolChoice: choice === "auto" || choice === "required" ? choice : "decided",
   };
 }
