@@ -1,5 +1,6 @@
 // How each coding agent is pointed at a gateway. Shared by the launchers and the benchmark runner,
 // so a benchmark drives an agent exactly the way `jev-codex`, `jev-claude`, and `jev-opencode` do.
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -108,6 +109,85 @@ function opencodeInlineConfig(origin) {
   };
 }
 
+const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * OPENCODE_CONFIG_CONTENT is one variable, and the user may already be using it. Theirs is kept
+ * and the gateway's is laid over it: the default models and the `jev-gateway` provider are the
+ * launcher's to set, everything else (agents, permissions, other providers) stays as they wrote
+ * it. Content that is not a JSON object is what OpenCode itself would refuse, so it is dropped.
+ */
+export function opencodeConfigContent(origin, inherited) {
+  const ours = opencodeInlineConfig(origin);
+  let theirs;
+  try {
+    theirs = inherited?.trim() ? JSON.parse(inherited) : undefined;
+  } catch {
+    theirs = undefined;
+  }
+  if (!isObject(theirs)) return JSON.stringify(ours);
+  const provider = { ...(isObject(theirs.provider) ? theirs.provider : {}), ...ours.provider };
+  return JSON.stringify({ ...theirs, ...ours, provider });
+}
+
+const providerOf = (model) => (typeof model === "string" && model.includes("/") ? model.slice(0, model.indexOf("/")) : undefined);
+
+/** The value of `-m` / `--model` among the arguments meant for OpenCode, if there is one. */
+function modelFlag(argv) {
+  for (const [index, arg] of argv.entries()) {
+    if (arg === "--") return undefined;
+    if (arg === "-m" || arg === "--model") return argv[index + 1];
+    if (arg.startsWith("--model=")) return arg.slice("--model=".length);
+    if (/^-m./.test(arg)) return arg.slice(2).replace(/^=/, "");
+  }
+  return undefined;
+}
+
+/**
+ * What in this OpenCode session will not go through the gateway, as lines for the user.
+ *
+ * The launcher sets the *default* model to one served by the gateway. OpenCode lets an agent name
+ * a model of its own (`agent.<name>.model`, or `model:` in an agent's markdown file), and `-m`
+ * outranks everything: either one selects another provider, whose traffic goes straight to that
+ * provider. Those are the user's choices and are left alone, but a session that quietly skips Jev
+ * looks exactly like one where Jev had nothing to decide, so they are said out loud.
+ *
+ * `resolved` is what `opencode debug config` prints: OpenCode's own merge of every config source,
+ * which is the only reliable way to know what an agent will use.
+ */
+export function opencodeOutsideGateway(resolved, argv = []) {
+  const outside = [];
+  const flag = modelFlag(argv);
+  if (flag !== undefined && providerOf(flag) !== OPENCODE_PROVIDER) outside.push(`this session (--model ${flag})`);
+  if (isObject(resolved)) {
+    if (providerOf(resolved.model) !== OPENCODE_PROVIDER) outside.push(`the default model (${resolved.model ?? "none"})`);
+    for (const [name, agent] of Object.entries(isObject(resolved.agent) ? resolved.agent : {})) {
+      if (!isObject(agent) || agent.disable === true || typeof agent.model !== "string") continue;
+      if (providerOf(agent.model) !== OPENCODE_PROVIDER) outside.push(`agent "${name}" (${agent.model})`);
+    }
+  }
+  if (outside.length === 0) return [];
+  return [
+    "these go straight to their provider, not through the gateway, because they name a model of their own:",
+    ...outside.map((line) => `  - ${line}`),
+    `Jev only sees requests to ${OPENCODE_PROVIDER}/* models. Agents without a model of their own use the default and are covered.`,
+  ];
+}
+
+/** Ask OpenCode how it resolves its configuration with ours laid over it. Undefined when it cannot say. */
+function opencodeResolvedConfig(env) {
+  return new Promise((resolve) => {
+    execFile("opencode", ["debug", "config"], { env, timeout: 5000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => {
+      if (error) return resolve(undefined);
+      try {
+        resolve(JSON.parse(stdout.slice(stdout.indexOf("{"))));
+      } catch {
+        resolve(undefined);
+      }
+    });
+  });
+}
+
 export const opencode = {
   name: "jev-opencode",
   client: "opencode",
@@ -116,16 +196,23 @@ export const opencode = {
   upstream: opencodeUpstream,
   upstreamHelp:
     "JEV_OPENCODE_UPSTREAM_BASE_URL   where OpenCode traffic goes (default https://api.openai.com/v1)\n" +
-    "JEV_OPENCODE_MODEL               model selected as jev-gateway/<model> (default gpt-5)",
+    "  JEV_OPENCODE_MODEL               model selected as jev-gateway/<model> (default gpt-5)\n" +
+    "  JEV_OPENCODE_CHECK               off skips listing the agents that bypass the gateway (saves about a second)",
   // No `args`: the model default comes from the injected config below, so a user `-m provider/model`
   // keeps its documented top priority and every other `opencode` flag forwards untouched.
   // The two experimental flags stay off for the launched process only (environment, never a user
   // file): the stable AI SDK provider path above is the supported one.
-  env: (origin) => ({
-    OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeInlineConfig(origin)),
+  env: (origin, inherited = process.env) => ({
+    OPENCODE_CONFIG_CONTENT: opencodeConfigContent(origin, inherited.OPENCODE_CONFIG_CONTENT),
     OPENCODE_EXPERIMENTAL_NATIVE_LLM: "false",
     OPENCODE_EXPERIMENTAL_CODE_MODE: "false",
   }),
+  // Costs about a second, which is OpenCode loading its configuration. JEV_OPENCODE_CHECK=off skips it.
+  notices: async (origin, argv, inherited = process.env) => {
+    if (inherited.JEV_OPENCODE_CHECK === "off") return [];
+    const resolved = await opencodeResolvedConfig({ ...inherited, ...opencode.env(origin, inherited) });
+    return opencodeOutsideGateway(resolved, argv);
+  },
   configHelp: (origin) => {
     // No OPENCODE_CONFIG_CONTENT one-liner here: single-quoting raw JSON breaks when a custom
     // model ID contains an apostrophe. The opencode.json file workflow below needs no shell

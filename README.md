@@ -195,6 +195,44 @@ untouched. The launcher uses stable `@ai-sdk/openai-compatible`, so OpenCode spe
 `POST /v1/chat/completions` off `http://127.0.0.1:8791/v1` by default, an endpoint the gateway
 already routes.
 
+### What goes through the gateway, and what does not
+
+Codex and Claude Code have one endpoint, so pointing them at the gateway covers everything they
+send. OpenCode chooses a provider per model, and the launcher only makes a gateway model the
+*default*. So:
+
+| Request | Through the gateway? |
+| --- | --- |
+| Agents and subagents with no `model` of their own (`build`, `plan`, `general` out of the box) | Yes: they use the default |
+| Session titles and other small-model work | Yes (`small_model` is set too), so some traffic on the dashboard does not mean your agents are covered |
+| An agent with its own `model`, in `opencode.json` (`agent.<name>.model`) or in its markdown file (`model:`) | **No.** It goes straight to that model's provider, and Jev never sees it |
+| A session started with `-m` / `--model` naming another provider | **No**, by your choice |
+
+The launcher does not rewrite the models you chose. It tells you instead: before OpenCode starts,
+and whenever you run `jev-opencode --status`, it lists what will bypass the gateway.
+
+```text
+jev-opencode: these go straight to their provider, not through the gateway, because they name a model of their own:
+  - agent "build" (anthropic/claude-sonnet-4-5)
+  - agent "reviewer" (openai/gpt-5)
+Jev only sees requests to jev-gateway/* models. Agents without a model of their own use the default and are covered.
+```
+
+To bring an agent under the gateway, give it a `jev-gateway/<model>` model or remove its `model`
+line. The gateway forwards to one upstream (`JEV_OPENCODE_UPSTREAM_BASE_URL`), so agents on
+different providers cannot all be routed at once.
+
+The list comes from OpenCode itself (`opencode debug config`, its own merge of every config
+source), which costs about a second at start-up. `JEV_OPENCODE_CHECK=off` skips it. If OpenCode
+cannot be asked, the launcher says nothing and starts as usual.
+
+An `OPENCODE_CONFIG_CONTENT` you already set is kept: the launcher lays its default models and the
+`jev-gateway` provider over it, and leaves the rest (agents, permissions, other providers) alone.
+
+On the dashboard, a gateway that shows **Idle** received nothing, which is what a bypassing agent
+looks like. One that shows **Passthrough only** received requests and did not route them, with
+the reason for each.
+
 Manage it like the other launchers:
 
 ```bash
@@ -202,7 +240,7 @@ jev-opencode --gateway-help   # list launcher commands (`--help` stays opencode'
 jev-opencode --print-config   # opencode.json snippet to point plain `opencode` at the gateway
 jev-opencode --start          # start the gateway without opening opencode
 jev-opencode --stop           # stop the background gateway
-jev-opencode --status         # is the gateway running, and where does it forward to?
+jev-opencode --status         # is the gateway running, where does it forward to, and what bypasses it?
 jev-opencode --dashboard      # open the monitoring dashboard in your browser
 ```
 

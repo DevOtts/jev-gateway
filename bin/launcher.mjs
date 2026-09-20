@@ -26,6 +26,8 @@ const ENV_FILES = [...(FROM_SOURCE && !process.env.JEV_SKIP_PROJECT_ENV ? [join(
  * @param {string} spec.upstreamHelp          help text describing the upstream default
  * @param {(origin: string) => string[]} [spec.args]   extra leading arguments for the client
  * @param {(origin: string) => Record<string, string>} [spec.env]  extra environment for the client
+ * @param {(origin: string, argv: string[]) => Promise<string[]>} [spec.notices]  what the user should
+ *   know before this session starts, e.g. traffic that will not reach the gateway; never throws
  * @param {(origin: string) => string} spec.configHelp  how to wire the client up permanently
  */
 /** Load the key for Jev and friends; real environment variables win over both files. */
@@ -71,6 +73,16 @@ Environment (or ${ENV_FILES.at(-1)}):
       return response.ok ? await response.json() : undefined;
     } catch {
       return undefined;
+    }
+  };
+
+  /** A notice is a courtesy: whatever goes wrong while working it out, the session still starts. */
+  const notices = async (argv) => {
+    try {
+      const lines = (await spec.notices?.(origin, argv)) ?? [];
+      return lines.map((line, index) => (index === 0 ? `${spec.name}: ${line}` : line));
+    } catch {
+      return [];
     }
   };
 
@@ -223,7 +235,9 @@ Environment (or ${ENV_FILES.at(-1)}):
     console.log(running ? `${spec.name}: router up on ${origin} → ${running.upstream}${via}` : `${spec.name}: router is not running`);
     const configured = configuredProvider(process.env, providers);
     console.log(configured ? `key: ${providers[configured].label} (${providers[configured].keyEnv})` : `key: none yet, run \`${spec.name} --setup\``);
-    return console.log(`logs: ${logFile}`);
+    console.log(`logs: ${logFile}`);
+    for (const line of await notices(process.argv.slice(3))) console.log(line);
+    return;
   }
   if (flag === "--dashboard") {
     await ensureRouter();
@@ -247,7 +261,10 @@ Environment (or ${ENV_FILES.at(-1)}):
     return spawn("tail", ["-n", "30", "-f", logFile], { stdio: "inherit" });
   }
 
-  await ensureRouter();
+  // Asked while the gateway starts, so the two waits overlap. Printed before the client takes over
+  // the terminal; `--status` shows the same lines at any time.
+  const [, warnings] = await Promise.all([ensureRouter(), notices(process.argv.slice(2))]);
+  for (const line of warnings) console.error(line);
   const child = spawn(spec.client, [...(spec.args?.(origin) ?? []), ...process.argv.slice(2)], {
     stdio: "inherit",
     env: { ...process.env, ...spec.env?.(origin) },
