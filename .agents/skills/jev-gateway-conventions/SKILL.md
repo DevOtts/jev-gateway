@@ -38,7 +38,9 @@ matching it. Do that first, every time.
 ## Commits and pull request titles
 
 Conventional Commits, because release-please derives the version and `CHANGELOG.md` from them.
-Pull requests are squash-merged, so the pull request title is the commit on `main`.
+The pull request title always reaches the changelog: as the commit when squashed (preferred), or
+through the merge commit's body. A merge commit also brings the branch's own commits onto `main`,
+and each conventional one gets a changelog line too, so they need the same care as the title.
 
 ```
 <type>[(scope)][!]: <what changes for the user, imperative, lower case, no full stop>

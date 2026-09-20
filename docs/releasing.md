@@ -76,6 +76,13 @@ work of a major one:
 Commits without a conventional prefix are invisible to release-please. They neither trigger a
 release nor appear in the changelog.
 
+A pull request's title counts however it is merged. A squash makes the title the commit. A merge
+commit gets the title in its body, where GitHub puts it, and release-please reads conventional
+lines there too: that is how #6, whose only commit had no prefix, reached 0.4.0. The difference is
+in what else counts. A merge commit also brings the pull request's own commits onto `main`, so
+each conventional one among them gets a changelog line next to the title's. A squash leaves the
+title alone, one line per pull request.
+
 To force a particular version, for example to go to 1.0.0, put a `Release-As: 1.0.0` footer in
 the body of a commit on `main`:
 
@@ -108,8 +115,8 @@ better, both optional:
   on `main`.
 - **Fix the source instead.** Edit the description of the *merged* pull request the entry came
   from and add an override block. release-please uses it in place of the original commit message
-  the next time it runs. This works for squash-merged pull requests only, which is one reason
-  pull requests here are squash-merged:
+  the next time it runs. This works for squash-merged pull requests only, which is one reason to
+  prefer squashing:
 
   ```
   BEGIN_COMMIT_OVERRIDE
@@ -136,9 +143,10 @@ workflow run that built it.
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| No release pull request appears after a merge | Nothing releasable landed: the commits are `docs:`, `chore:` and the like, or have no conventional prefix at all. With squash merges, the pull request *title* is the commit message | Nothing is wrong if there is nothing to release. Otherwise add an override block to the merged pull request (see [The changelog](#the-changelog)) and re-run the workflow |
+| No release pull request appears after a merge | Nothing releasable landed: the commits are `docs:`, `chore:` and the like, or neither the pull request's title nor any of its commits has a conventional prefix | Nothing is wrong if there is nothing to release. Otherwise add an override block to the merged pull request (see [The changelog](#the-changelog)) and re-run the workflow |
 | The release-please job fails with `GitHub Actions is not permitted to create or approve pull requests` | The repository setting is off | Turn it on: see [One-time setup on GitHub](#one-time-setup-on-github) |
 | CI does not run on the release pull request | A pull request opened with `GITHUB_TOKEN` starts no workflows | Expected. It only changes `package.json` and `CHANGELOG.md`, and the publish job runs the full checks before anything reaches npm. To run CI anyway, close and reopen the pull request |
+| Released changes sit under a `## Unreleased` heading in `CHANGELOG.md` | Someone wrote changelog entries by hand in a pull request. release-please does not read them: it adds its own section below and leaves that heading where it was (this happened with 0.4.0) | Move the text into the version's section, in a `docs:` commit, and delete the heading. Changelog entries come from commit messages; to word one better, see [The changelog](#the-changelog) |
 | The release pull request has merge conflicts | `package.json` or `CHANGELOG.md` changed on `main` by hand | Push anything to `main`, or re-run the workflow: release-please rebuilds the branch from `main` |
 | The version in the release pull request is not what you expected | A commit has the wrong type, or a `!` that should not be there | Correct it with an override block, or force the version with `Release-As:` |
 | `Tag vX.Y.Z does not match package.json version` | Only with a tag made by hand, pushed without the version bump | Nothing was published. Delete the tag (`git push origin :vX.Y.Z`, `git tag -d vX.Y.Z`) and release through the pull request |
