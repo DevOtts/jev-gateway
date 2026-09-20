@@ -472,27 +472,15 @@ pnpm typecheck
 pnpm build
 ```
 
-Pull requests run the same checks in CI. Releases are automatic: pushing a `vX.Y.Z` tag publishes
-to npm through trusted publishing, with no tokens involved. See [docs/releasing.md](docs/releasing.md).
+Pull requests are welcome and run the same checks in CI. [CONTRIBUTING.md](CONTRIBUTING.md) covers
+running your changes, where things live in the code, how to add a wire format or a client
+launcher, and what a pull request should contain.
 
 `scripts/mock-jev.mjs` is a local stand-in for Jev. Point `TYPESAFE_BASE_URL` at it to drive a real
 agent end to end without a TypeSafe key.
 
-```
-src/adapters/         request formats: chat.ts, responses.ts (Codex), messages.ts (Claude Code), gemini.ts (Gemini)
-src/state.ts          turns a conversation into Jev state
-src/questions.ts      turns tools into Jev questions and finds closed-set arguments
-src/decide.ts         the mode decision
-src/jev.ts            the call to Jev, for TypeSafe, OpenRouter or Vercel (providers.json)
-src/upstream.ts       streaming reverse proxy
-src/usage.ts          token usage read from a reply, normalised across providers
-src/app.ts            routes, auth, headers, and the resend-on-rejection fallback
-src/events.ts         recent request metadata kept in memory and restored from the log
-src/dashboard.ts      serves /dashboard (dashboard.html is the whole page, no build step)
-bin/                  jev-codex, jev-claude, jev-opencode and jev-gemini launchers (launcher.mjs,
-                      clients.mjs) and the first-run setup (setup.mjs)
-scripts/mock-jev.mjs  local stand-in for Jev
-```
+Releases are automatic: release-please keeps a release pull request open, and merging it publishes
+to npm through trusted publishing, with no tokens involved. See [docs/releasing.md](docs/releasing.md).
 
 ## License
 

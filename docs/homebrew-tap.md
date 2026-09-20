@@ -15,7 +15,8 @@ been checked on a real machine, add the install instructions to the README.
 
 1. Create the tap repo `vinilana/homebrew-tap` with a `Formula/` directory (below).
 2. Add the `HOMEBREW_TAP_TOKEN` secret to this repo (below).
-3. Publish a release: tag → npm publish → formula bump (automatic).
+3. Publish a release by merging the release pull request (see [releasing.md](releasing.md)):
+   tag → npm publish → formula bump, all automatic.
 4. Verify with `brew install` + `brew test` (below).
 
 ## Tap bootstrap
@@ -53,7 +54,7 @@ homebrew-tap/
 
 ## Release ordering
 
-Tag, then npm, then the GitHub release, then the formula. `release.yml` publishes the tag to npm
+The tag and the GitHub release, then npm, then the formula. `release.yml` publishes the tag to npm
 and calls this workflow afterwards, so the tarball normally exists by the time it runs. It still
 polls for the tarball before computing the SHA256, because the registry can take a moment to serve
 a new version. If the tarball never appears, the run fails with an error naming the version.
