@@ -419,7 +419,7 @@ list. The ones worth knowing:
 | `JEV_TIMEOUT_MS` | `4000` | How long to wait for Jev before letting the LLM decide |
 | `ARGS_MODEL` | unset | A cheaper model for filling arguments in `forced` mode |
 | `HOST` | `127.0.0.1` | Interface to listen on. Set `ROUTER_API_KEY` before exposing it |
-| `JEV_DEBUG_DUMP_DIR` | unset | Write requests and response summaries to this folder, with credentials redacted |
+| `JEV_DEBUG_DUMP_DIR` | unset | Write requests and response summaries to this folder. Credentials in headers are redacted; bodies are written whole, system prompts and conversation included, in files only you can read |
 
 Each request also logs one JSON line to stdout, or to `~/.jev-gateway/<client>.log` under a launcher.
 
@@ -436,6 +436,11 @@ Each request also logs one JSON line to stdout, or to `~/.jev-gateway/<client>.l
   keep their newest turns. It is most accurate in English.
 - The default confidence thresholds are starting points. Use the dashboard and baseline mode to tune
   them for your own work.
+- A gateway started by a launcher has no key of its own, because the one `Authorization` header a
+  client sends belongs to its provider. Any process on your machine can therefore use it: to reach
+  the provider with credentials of its own, and to ask Jev on your key through `/router/decide`.
+  It is not reachable from other machines. A gateway you run as a server can require a key
+  (`ROUTER_API_KEY`), and then `/health` says only that it is up.
 
 ## Benchmark
 

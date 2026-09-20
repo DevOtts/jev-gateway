@@ -214,7 +214,11 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     return response;
   };
 
-  app.get("/health", (c) => c.json({ status: "ok", pid: process.pid, upstream: config.upstreamBaseUrl, jev: config.jevProvider }));
+  // Answers before the key is checked, so that a launcher can find its gateway. A gateway that
+  // has a key is one somebody else may reach: it says that it is up, and nothing about itself.
+  app.get("/health", (c) =>
+    c.json(config.routerApiKey ? { status: "ok" } : { status: "ok", pid: process.pid, upstream: config.upstreamBaseUrl, jev: config.jevProvider }),
+  );
 
   app.use("*", async (c, next) => {
     if (!config.routerApiKey) return next();

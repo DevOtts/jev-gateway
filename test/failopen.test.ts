@@ -153,3 +153,17 @@ describe("Chat Completions tools that are not functions", () => {
     expect(jev.requests).toHaveLength(0);
   });
 });
+
+describe("/health", () => {
+  it("tells a launcher what it needs to find its gateway", async () => {
+    const { app } = setup();
+    expect(await (await app.request("/health")).json()).toMatchObject({ status: "ok", pid: process.pid, upstream: "https://llm.test/v1" });
+  });
+
+  it("says only that it is up once the gateway has a key", async () => {
+    const { app } = setup(weather, testConfig({ routerApiKey: "gateway-key", upstreamApiKey: "provider-key" }));
+    const response = await app.request("/health");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "ok" });
+  });
+});
