@@ -16,6 +16,13 @@
   installed with the package. `TYPESAFE_BASE_URL` still redirects the TypeSafe provider, and
   `JEV_URL` replaces the endpoint of any provider.
 
+## [0.4.0](https://github.com/vinilana/jev-gateway/compare/v0.3.1...v0.4.0) (2026-09-20)
+
+
+### Added
+
+* Ask for the Jev key on first run; reach Jev through OpenRouter or Vercel too ([c16ad7b](https://github.com/vinilana/jev-gateway/commit/c16ad7be7348d6e19b1f6ffee5ec15e1b86ec821))
+
 ## 0.3.1
 
 First version published by the release workflow. It carries everything listed under 0.3.0, which
