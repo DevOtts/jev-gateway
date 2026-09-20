@@ -14,8 +14,9 @@ Anthropic or Google Gemini APIs.
 
 ## Quick start
 
-You need Node.js 22.15 or newer, a [TypeSafe API key](https://docs.typesafe.ai/introduction), and
-Codex, Claude Code, and/or OpenCode already installed and logged in.
+You need Node.js 22.15 or newer, a key for Jev (from TypeSafe, OpenRouter or Vercel AI Gateway, see
+[Where Jev runs](#where-jev-runs)), and Codex, Claude Code, and/or OpenCode already installed and
+logged in.
 
 **1. Install**
 
@@ -23,20 +24,29 @@ Codex, Claude Code, and/or OpenCode already installed and logged in.
 npm install -g jev-gateway
 ```
 
-**2. Save your TypeSafe key**
-
-```bash
-mkdir -p ~/.jev-gateway
-echo "TYPESAFE_API_KEY=your-key-here" > ~/.jev-gateway/.env
-```
-
-**3. Run your agent through the gateway**
+**2. Run your agent through the gateway**
 
 ```bash
 jev-codex      # use it exactly like `codex`
 jev-claude     # use it exactly like `claude`
 jev-opencode   # use it exactly like `opencode` (stable v1)
 jev-gemini     # Gemini CLI, with a Gemini API key
+```
+
+**3. Answer two questions, once**
+
+The first time, the launcher asks where you want to reach Jev and for the key. It checks the key
+with one real call, saves it to `~/.jev-gateway/.env` (readable only by you), and carries on into
+your agent. Every `jev-` command shares that file, so you are asked once for all of them.
+
+```text
+Where do you want to reach Jev?
+  1) TypeSafe: the official API, direct from the makers of Jev
+  2) OpenRouter: Jev through your OpenRouter account and credits
+  3) Vercel AI Gateway: Jev through your Vercel AI Gateway key and billing
+Choose 1-3 [1]:
+Paste your TypeSafe API key (input is hidden):
+The key works (Jev answered in 712 ms).
 ```
 
 **4. Watch it work**
@@ -76,6 +86,7 @@ All of these work with `jev-codex`, `jev-claude`, `jev-opencode` and `jev-gemini
 | `jev-codex --logs` | Follow routing decisions live (use a second terminal) |
 | `jev-codex --start` | Start the gateway without opening the agent |
 | `jev-codex --stop` | Stop the background gateway (close your sessions first) |
+| `jev-codex --setup` | Choose where to reach Jev again, or change the key |
 | `jev-codex --print-config` | Print settings to point plain `codex` at the gateway permanently |
 | `jev-codex --gateway-help` | List all of the above |
 
@@ -118,6 +129,31 @@ jev-codex --routing on     # do a similar task
 The same switch is a button on each gateway card. The "Token use" card then shows both states side
 by side: tokens in and out per request, cache share, reasoning tokens, and seconds. The comparison
 is only meaningful if you do similar work in both states.
+
+## Where Jev runs
+
+Jev is served by TypeSafe and by two gateways that resell it. All three take the same questions
+and return the same answers, so the choice is about whose account and billing you want to use.
+
+| Provider | Key variable | Default model | Get a key |
+| --- | --- | --- | --- |
+| TypeSafe (official) | `TYPESAFE_API_KEY` | `jev-latest` | [typesafe.ai](https://typesafe.ai) |
+| OpenRouter | `OPENROUTER_API_KEY` | `typesafe/jev-1.13` | [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys) |
+| Vercel AI Gateway | `AI_GATEWAY_API_KEY` | `typesafe-ai/jev` | [Vercel dashboard](https://vercel.com/dashboard/ai-gateway/api-keys) |
+
+`jev-codex --setup` (or any other launcher) switches between them and restarts the gateway with the
+new key. To configure it by hand instead, put `JEV_PROVIDER` and the matching key in
+`~/.jev-gateway/.env` or in your environment. Without `JEV_PROVIDER`, the gateway uses whichever key
+it finds, TypeSafe's first. `JEV_MODEL` picks another model; an id written for one provider is
+ignored under another, because the providers name their models differently. `--status` and the
+dashboard show which provider is in use.
+
+With no terminal to ask in (CI, scripts), a launcher does not wait for input: it exits and names
+the variables it looked for.
+
+The TypeSafe path is run against the real API. The OpenRouter and Vercel paths follow those
+providers' published endpoints and are covered by tests, but have not been run with real keys yet.
+The first-run key check will tell you at once if one of them disagrees.
 
 ## Using it with Codex
 
@@ -374,7 +410,8 @@ list. The ones worth knowing:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `TYPESAFE_API_KEY` | required | Your TypeSafe key |
+| `TYPESAFE_API_KEY`, `OPENROUTER_API_KEY` or `AI_GATEWAY_API_KEY` | one is required | The key for Jev; the launchers ask for it on first run |
+| `JEV_PROVIDER` | whichever key is set | `typesafe`, `openrouter` or `vercel` |
 | `JEV_MIN_CONFIDENCE` | `0.7` | Below this confidence, the LLM decides. Lower it to route more, raise it to be more careful |
 | `JEV_ARG_MIN_CERTAINTY` | `0.8` | Every argument must reach this for a `direct` answer |
 | `JEV_DIRECT_CALLS` | `true` | Set to `false` so the gateway never answers without the LLM |
@@ -445,13 +482,15 @@ agent end to end without a TypeSafe key.
 src/adapters/         request formats: chat.ts, responses.ts (Codex), messages.ts (Claude Code), gemini.ts (Gemini)
 src/state.ts          turns a conversation into Jev state
 src/questions.ts      turns tools into Jev questions and finds closed-set arguments
-src/decide.ts         the Jev call and the mode decision
+src/decide.ts         the mode decision
+src/jev.ts            the call to Jev, for TypeSafe, OpenRouter or Vercel (providers.json)
 src/upstream.ts       streaming reverse proxy
 src/usage.ts          token usage read from a reply, normalised across providers
 src/app.ts            routes, auth, headers, and the resend-on-rejection fallback
 src/events.ts         recent request metadata kept in memory and restored from the log
 src/dashboard.ts      serves /dashboard (dashboard.html is the whole page, no build step)
-bin/                  jev-codex, jev-claude, jev-opencode and jev-gemini launchers (launcher.mjs, clients.mjs)
+bin/                  jev-codex, jev-claude, jev-opencode and jev-gemini launchers (launcher.mjs,
+                      clients.mjs) and the first-run setup (setup.mjs)
 scripts/mock-jev.mjs  local stand-in for Jev
 ```
 

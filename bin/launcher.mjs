@@ -5,14 +5,16 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, write
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { configuredProvider, loadProviders, runSetup, terminalIo } from "./setup.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const STATE_DIR = join(homedir(), ".jev-gateway");
 // A git checkout runs the TypeScript sources directly; an installed package only ships dist/.
 const FROM_SOURCE = existsSync(join(ROOT, "src/index.ts"));
 const ROUTER_ARGS = FROM_SOURCE ? ["--import", "tsx", join(ROOT, "src/index.ts")] : [join(ROOT, "dist/index.js")];
-/** Where TYPESAFE_API_KEY and tuning knobs may live; the first file to set a variable wins. */
-const ENV_FILES = [...(FROM_SOURCE ? [join(ROOT, ".env")] : []), join(STATE_DIR, ".env")];
+/** Where the key for Jev and tuning knobs may live; the first file to set a variable wins. */
+// (JEV_SKIP_PROJECT_ENV keeps a checkout's own .env out of it, so tests see a clean machine.)
+const ENV_FILES = [...(FROM_SOURCE && !process.env.JEV_SKIP_PROJECT_ENV ? [join(ROOT, ".env")] : []), join(STATE_DIR, ".env")];
 
 /**
  * @param {object} spec
@@ -26,7 +28,7 @@ const ENV_FILES = [...(FROM_SOURCE ? [join(ROOT, ".env")] : []), join(STATE_DIR,
  * @param {(origin: string) => Record<string, string>} [spec.env]  extra environment for the client
  * @param {(origin: string) => string} spec.configHelp  how to wire the client up permanently
  */
-/** Load TYPESAFE_API_KEY and friends; real environment variables win over both files. */
+/** Load the key for Jev and friends; real environment variables win over both files. */
 export function loadEnv() {
   for (const file of ENV_FILES) if (existsSync(file)) process.loadEnvFile(file);
 }
@@ -51,11 +53,13 @@ export async function runLauncher(spec) {
   ${spec.name} --logs             follow routing decisions live (use a second terminal)
   ${spec.name} --start            start the gateway without opening ${spec.client}
   ${spec.name} --stop             stop the background gateway
+  ${spec.name} --setup            choose where to reach Jev (TypeSafe, OpenRouter, Vercel) and set the key
   ${spec.name} --print-config     how to point plain \`${spec.client}\` at the gateway permanently
   ${spec.name} --gateway-help     this text (\`--help\` shows ${spec.client}'s own help)
 
 Environment (or ${ENV_FILES.at(-1)}):
-  TYPESAFE_API_KEY   required — Jev makes the tool-selection call
+  A key for Jev is required. ${spec.name} asks for it the first time and saves it; it can be
+  TYPESAFE_API_KEY, OPENROUTER_API_KEY or AI_GATEWAY_API_KEY (JEV_PROVIDER picks when several are set)
   ${spec.portEnv}   router port for ${spec.client} (default ${spec.defaultPort})
   ${spec.upstreamHelp}
   BROWSER            command --dashboard opens the page with; "none" only prints the URL
@@ -73,6 +77,31 @@ Environment (or ${ENV_FILES.at(-1)}):
   const tailLog = (lines = 15) =>
     existsSync(logFile) ? readFileSync(logFile, "utf8").trimEnd().split("\n").slice(-lines).join("\n") : "";
 
+  const providers = loadProviders(ROOT);
+  const envFile = ENV_FILES.at(-1);
+
+  /** Ask for the key and adopt the answer in this process, so the gateway it starts inherits it. */
+  const setup = async () => {
+    let saved;
+    try {
+      saved = await runSetup({ name: spec.name, providers, envFile, io: terminalIo() });
+    } catch {
+      console.error(`\n${spec.name}: setup cancelled.`);
+      process.exit(130);
+    }
+    if (!saved) process.exit(1);
+    Object.assign(process.env, saved);
+  };
+
+  /** No key, no routing. With a person at the keyboard, ask; otherwise say exactly what is missing. */
+  const ensureKey = async () => {
+    if (configuredProvider(process.env, providers)) return;
+    if (process.stdin.isTTY && process.stdout.isTTY) return setup();
+    const names = Object.values(providers).map((provider) => provider.keyEnv).join(", ");
+    console.error(`${spec.name}: no API key for Jev. Run \`${spec.name} --setup\` in a terminal, or set one of ${names} (environment or ${envFile}).`);
+    process.exit(1);
+  };
+
   const ensureRouter = async () => {
     const upstream = spec.upstream().replace(/\/+$/, "");
     const running = await health();
@@ -82,10 +111,7 @@ Environment (or ${ENV_FILES.at(-1)}):
       console.error(`${" ".repeat(spec.name.length)}  Run \`${spec.name} --stop\` and try again.`);
       process.exit(1);
     }
-    if (!process.env.TYPESAFE_API_KEY) {
-      console.error(`${spec.name}: TYPESAFE_API_KEY is not set. Export it, or put it in ${ENV_FILES.at(-1)}`);
-      process.exit(1);
-    }
+    await ensureKey();
 
     mkdirSync(STATE_DIR, { recursive: true });
     const log = openSync(logFile, "a");
@@ -162,6 +188,16 @@ Environment (or ${ENV_FILES.at(-1)}):
   const [first] = process.argv.slice(2);
   const flag = LEGACY[first] ?? first?.replace(/^--jev-(?=dashboard$|routing$|status$|logs$|start$|stop$)/, "--");
   if (flag === "--gateway-help") return console.log(help);
+  if (flag === "--setup") {
+    if (!process.stdin.isTTY) return console.error(`${spec.name}: --setup asks questions, so it needs a terminal.`);
+    await setup();
+    // A gateway that is already running read the old key when it started.
+    if (await health()) {
+      await stopRouter();
+      console.log(`${spec.name}: the gateway will start with the new key the next time you run ${spec.name}.`);
+    }
+    return;
+  }
   if (flag === "--stop") return await stopRouter();
   if (flag === "--routing") {
     const wanted = process.argv[3];
@@ -183,7 +219,10 @@ Environment (or ${ENV_FILES.at(-1)}):
   }
   if (flag === "--status") {
     const running = await health();
-    console.log(running ? `${spec.name}: router up on ${origin} → ${running.upstream}` : `${spec.name}: router is not running`);
+    const via = running?.jev ? `, Jev via ${providers[running.jev]?.label ?? running.jev}` : "";
+    console.log(running ? `${spec.name}: router up on ${origin} → ${running.upstream}${via}` : `${spec.name}: router is not running`);
+    const configured = configuredProvider(process.env, providers);
+    console.log(configured ? `key: ${providers[configured].label} (${providers[configured].keyEnv})` : `key: none yet, run \`${spec.name} --setup\``);
     return console.log(`logs: ${logFile}`);
   }
   if (flag === "--dashboard") {

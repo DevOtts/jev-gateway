@@ -57,14 +57,14 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
-    "@typesafe-ai/sdk": "^0.6.0",
     "hono": "^4.13.8"
   },
   "devDependencies": {
     "@types/node": "^22.20.3",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "tsx": "^4.23.13",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1",
-    "tsx": "^4.23.13"
+    "vitest": "^5.0.1"
   },
   "packageManager": "pnpm@10.33.3"
 }

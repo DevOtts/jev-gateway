@@ -38,6 +38,7 @@ export function dashboardRoutes(config: Config, events: EventLog, routing: Routi
         client: config.client,
         upstream: config.upstreamBaseUrl,
         jevModel: config.jevModel,
+        jevProvider: config.jevProvider,
         minConfidence: config.minConfidence,
         routing: routing.get(),
         // Sequence numbers restart with the process: a page that sees this change starts over.

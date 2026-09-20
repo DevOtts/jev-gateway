@@ -179,7 +179,7 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
     return response;
   };
 
-  app.get("/health", (c) => c.json({ status: "ok", pid: process.pid, upstream: config.upstreamBaseUrl }));
+  app.get("/health", (c) => c.json({ status: "ok", pid: process.pid, upstream: config.upstreamBaseUrl, jev: config.jevProvider }));
 
   app.use("*", async (c, next) => {
     if (!config.routerApiKey) return next();

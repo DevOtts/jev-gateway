@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **First-run setup.** Every `jev-` launcher now asks where to reach Jev and for the key when none
+  is configured, checks the key with one real call, and saves it to `~/.jev-gateway/.env`. No file
+  to write by hand. `--setup` runs it again, `--status` shows which provider is in use, and without
+  a terminal a launcher exits naming what is missing instead of waiting for input.
+- **Jev through OpenRouter and Vercel AI Gateway**, next to TypeSafe's own API. Set
+  `OPENROUTER_API_KEY` or `AI_GATEWAY_API_KEY`, or pick one in the setup. `JEV_PROVIDER` chooses
+  when several keys are present.
+
+### Changed
+- The gateway calls Jev over plain HTTP for all three providers, so `@typesafe-ai/sdk` is no longer
+  installed with the package. `TYPESAFE_BASE_URL` still redirects the TypeSafe provider, and
+  `JEV_URL` replaces the endpoint of any provider.
+
 ## 0.3.1
 
 First version published by the release workflow. It carries everything listed under 0.3.0, which

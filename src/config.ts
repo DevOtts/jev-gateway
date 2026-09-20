@@ -1,3 +1,4 @@
+import { PROVIDERS, resolveModel, resolveProvider, resolveUrl, type ProviderId } from "./jev.js";
 export interface Config {
   /** Interface to listen on. Loopback by default: the gateway forwards credentials and must not be reachable from the LAN. */
   host: string;
@@ -10,6 +11,12 @@ export interface Config {
   routerApiKey?: string;
   /** Model used upstream once Jev has already picked the tool. */
   argsModel?: string;
+  /** Who serves Jev: TypeSafe itself, or a gateway that resells it. */
+  jevProvider: ProviderId;
+  /** The key for that provider; the launchers ask for it when it is missing. */
+  jevApiKey?: string;
+  /** Endpoint the questions are posted to; the provider's own unless overridden (tests, proxies). */
+  jevUrl: string;
   jevModel: string;
   jevTimeoutMs: number;
   /** Below this, Jev's tool decision is ignored and the LLM decides. */
@@ -52,6 +59,7 @@ const bool = (env: Env, key: string, fallback: boolean): boolean => {
 };
 
 export function loadConfig(env: Env = process.env): Config {
+  const jevProvider = resolveProvider(env);
   const onNone = str(env, "JEV_ON_NONE") ?? "force_none";
   if (onNone !== "force_none" && onNone !== "passthrough") {
     throw new Error(`JEV_ON_NONE must be "force_none" or "passthrough", got "${onNone}"`);
@@ -63,7 +71,10 @@ export function loadConfig(env: Env = process.env): Config {
     upstreamApiKey: str(env, "UPSTREAM_API_KEY"),
     routerApiKey: str(env, "ROUTER_API_KEY"),
     argsModel: str(env, "ARGS_MODEL"),
-    jevModel: str(env, "JEV_MODEL") ?? "jev-latest",
+    jevProvider,
+    jevApiKey: str(env, PROVIDERS[jevProvider].keyEnv),
+    jevUrl: resolveUrl(jevProvider, env),
+    jevModel: resolveModel(jevProvider, str(env, "JEV_MODEL")),
     jevTimeoutMs: num(env, "JEV_TIMEOUT_MS", 4000),
     minConfidence: num(env, "JEV_MIN_CONFIDENCE", 0.7),
     argMinCertainty: num(env, "JEV_ARG_MIN_CERTAINTY", 0.8),
