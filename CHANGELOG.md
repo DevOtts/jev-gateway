@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.1](https://github.com/vinilana/jev-gateway/compare/v0.4.0...v0.4.1) (2026-09-20)
+
+
+### Fixed
+
+* keep /health to "ok" once the gateway has a key ([57651ff](https://github.com/vinilana/jev-gateway/commit/57651ff8e6d1d40fd0cacabb8941c6703c4a773d)), closes [#8](https://github.com/vinilana/jev-gateway/issues/8)
+* keep hostile tool names out of hints, and pass malformed requests through instead of failing ([40fd608](https://github.com/vinilana/jev-gateway/commit/40fd60848915dc08e61305b3b1620ac0f035ccfb))
+* keep tool names that are not a single inert token away from Jev and the LLM ([f306026](https://github.com/vinilana/jev-gateway/commit/f306026d74156a93f50a5fa9f2b035163a74956c)), closes [#8](https://github.com/vinilana/jev-gateway/issues/8)
+* pass malformed requests through instead of answering 500 ([174d84a](https://github.com/vinilana/jev-gateway/commit/174d84a09cdbb0810409bfb59ac7b74c2a139147)), closes [#8](https://github.com/vinilana/jev-gateway/issues/8)
+* route Chat Completions requests that also carry built-in tools ([f6fd00c](https://github.com/vinilana/jev-gateway/commit/f6fd00c95dc0e6a36bb2ba8b23dcd5aaecce9137)), closes [#8](https://github.com/vinilana/jev-gateway/issues/8)
+
 ## [0.4.0](https://github.com/vinilana/jev-gateway/compare/v0.3.1...v0.4.0) (2026-09-20)
 
 ### Added
