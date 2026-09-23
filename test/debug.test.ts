@@ -77,6 +77,24 @@ describe("debug dumps (JEV_DEBUG_DUMP_DIR)", () => {
   it("summarizes a stream the client cut short as unparsed rather than throwing", () => {
     expect(summarizeResponse('event: response.created\ndata: {"type":"response.cre')).toHaveProperty("unparsed");
   });
+
+  it("summarizes Anthropic Messages streams with cache and context metadata", () => {
+    expect(
+      summarizeResponse(
+        sseOf([
+          { type: "message_start", message: { model: "claude-test", usage: { input_tokens: 12, cache_read_input_tokens: 8 } } },
+          { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 }, context_management: { applied_edits: [] } },
+          { type: "message_stop" },
+        ]),
+      ),
+    ).toMatchObject({
+      protocol: "anthropic_messages",
+      model: "claude-test",
+      stop_reason: "end_turn",
+      usage: { input_tokens: 12, cache_read_input_tokens: 8, output_tokens: 3 },
+      context_management: { applied_edits: [] },
+    });
+  });
 });
 
 describe("forward", () => {

@@ -30,6 +30,10 @@ type OutputItem = { type?: string; name?: string; namespace?: string };
 export function summarizeResponse(text: string): Record<string, unknown> {
   let done: Record<string, unknown> | undefined;
   let ending: string | undefined;
+  let anthropicUsage: Record<string, unknown> | undefined;
+  let anthropicModel: unknown;
+  let anthropicStopReason: unknown;
+  let anthropicContextManagement: unknown;
   // "responses-lite" streams leave `response.output` empty; the items only appear as events.
   const streamed: OutputItem[] = [];
   const parse = (json: string) => {
@@ -37,6 +41,18 @@ export function summarizeResponse(text: string): Record<string, unknown> {
       const event = JSON.parse(json) as { type?: string; response?: Record<string, unknown>; item?: OutputItem };
       if (event.type === "response.output_item.done" && event.item) streamed.push(event.item);
       else if (event.type && TERMINAL.has(event.type)) [ending, done] = [event.type, event.response];
+      else if (event.type === "message_start") {
+        const message = event as { message?: { model?: unknown; usage?: Record<string, unknown> } };
+        anthropicModel = message.message?.model;
+        anthropicUsage = message.message?.usage;
+      } else if (event.type === "message_delta") {
+        const delta = event as { delta?: { stop_reason?: unknown }; usage?: Record<string, unknown>; context_management?: unknown };
+        anthropicStopReason = delta.delta?.stop_reason;
+        anthropicUsage = { ...(anthropicUsage ?? {}), ...(delta.usage ?? {}) };
+        anthropicContextManagement = delta.context_management;
+      } else if (event.type === "message_stop") {
+        ending = "message_stop";
+      }
       else if (!event.type) done = event as Record<string, unknown>;
     } catch {
       // A chunk cut short by the client hanging up.
@@ -45,6 +61,16 @@ export function summarizeResponse(text: string): Record<string, unknown> {
   if (text.trimStart().startsWith("{")) parse(text);
   else for (const line of text.split("\n")) if (line.startsWith("data:")) parse(line.slice(5));
 
+  if (!done && anthropicUsage) {
+    return {
+      protocol: "anthropic_messages",
+      model: anthropicModel,
+      stop_reason: anthropicStopReason,
+      usage: anthropicUsage,
+      context_management: anthropicContextManagement,
+      ending,
+    };
+  }
   if (!done) return { unparsed: text.slice(-2_000) };
   const { attribution: _perItem, ...usage } = (done.usage ?? {}) as Record<string, unknown>;
   const output = streamed.length ? streamed : Array.isArray(done.output) ? (done.output as OutputItem[]) : [];
