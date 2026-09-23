@@ -68,19 +68,33 @@ export async function forward(
   if (config.upstreamApiKey) headers.set("authorization", `Bearer ${config.upstreamApiKey}`);
   if (typeof options.body === "string") headers.delete("content-encoding");
 
+  let body = options.body;
+  if (config.stripContextManagement && body instanceof Uint8Array && headers.get("content-type")?.includes("application/json")) {
+    try {
+      const json = JSON.parse(new TextDecoder().decode(body)) as Record<string, unknown>;
+      if (Object.hasOwn(json, "context_management")) {
+        delete json.context_management;
+        body = JSON.stringify(json);
+        headers.delete("content-encoding");
+      }
+    } catch {
+      // Preserve the original body if the experimental transform cannot parse it.
+    }
+  }
+
   // Controlled transport experiment for Claude Code: when routing has already consumed the
   // request, the byte body is unchanged. Restore only the framing values that still describe
   // that exact body; never restore them for rewritten JSON or streamed passthrough requests.
-  if (config.preserveFraming && options.body instanceof Uint8Array) {
-    headers.set("content-length", String(options.body.byteLength));
+  if (config.preserveFraming && body instanceof Uint8Array) {
+    headers.set("content-length", String(body.byteLength));
     const acceptEncoding = incoming.headers.get("accept-encoding");
     if (acceptEncoding) headers.set("accept-encoding", acceptEncoding);
   }
 
   const hasBody = incoming.method !== "GET" && incoming.method !== "HEAD";
   const init: RequestInit & { duplex?: "half" } = { method: incoming.method, headers, signal: incoming.signal };
-  if (options.body !== undefined) {
-    init.body = options.body as BodyInit;
+  if (body !== undefined) {
+    init.body = body as BodyInit;
   } else if (hasBody && incoming.body) {
     init.body = incoming.body;
     init.duplex = "half";
@@ -99,7 +113,7 @@ export async function forward(
     // Claude Code reacts badly when a transient rate limit is exposed during its startup
     // probe: it enters its automatic context-management UI before retrying. Routed requests
     // have a replayable body, so absorb one 429 inside the gateway instead of exposing it.
-    if (config.retryUpstreamRateLimit && options.body !== undefined && upstream.status === 429) {
+    if (config.retryUpstreamRateLimit && body !== undefined && upstream.status === 429) {
       await upstream.body?.cancel();
       await new Promise((resolve) => setTimeout(resolve, retryDelayMs(upstream)));
       upstream = await fetchImpl(target, init);
@@ -117,6 +131,6 @@ export async function forward(
     if (!DROPPED_RESPONSE_HEADERS.has(name)) responseHeaders.set(name, value);
   });
   for (const [name, value] of Object.entries(options.responseHeaders ?? {})) responseHeaders.set(name, value);
-  const body = config.rawResponse ? upstream.body : quietOnClientAbort(upstream.body, incoming.signal);
-  return new Response(body, { status: upstream.status, headers: responseHeaders });
+  const responseBody = config.rawResponse ? upstream.body : quietOnClientAbort(upstream.body, incoming.signal);
+  return new Response(responseBody, { status: upstream.status, headers: responseHeaders });
 }

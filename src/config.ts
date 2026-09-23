@@ -39,6 +39,8 @@ export interface Config {
   preserveFraming: boolean;
   /** Experimental: retry one upstream 429 when the request body can be replayed safely. */
   retryUpstreamRateLimit: boolean;
+  /** Experimental: remove Claude's context-management edit from replayed JSON bodies. */
+  stripContextManagement: boolean;
   /** JSON-lines file this process's stdout is appended to, if any: the dashboard's history. */
   logFile?: string;
 }
@@ -94,6 +96,7 @@ export function loadConfig(env: Env = process.env): Config {
     rawResponse: bool(env, "JEV_RAW_RESPONSE", false),
     preserveFraming: bool(env, "JEV_PRESERVE_FRAMING", false),
     retryUpstreamRateLimit: bool(env, "JEV_RETRY_UPSTREAM_RATE_LIMIT", false),
+    stripContextManagement: bool(env, "JEV_STRIP_CONTEXT_MANAGEMENT", false),
     logFile: str(env, "JEV_LOG_FILE"),
   };
   if (config.routerApiKey && !config.upstreamApiKey) {
