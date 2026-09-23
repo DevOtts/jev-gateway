@@ -81,7 +81,21 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
    */
   const logWhenDone = (entry: Record<string, unknown>, response: Response, startedAt: number) => {
     const copy = response.clone();
-    void readUsage(copy).then((usage) => {
+    const errorCopy = response.status >= 400 ? response.clone() : undefined;
+    const readProviderError = async () => {
+      if (!errorCopy) return {};
+      try {
+        const payload = JSON.parse(await errorCopy.text()) as { error?: { type?: unknown; message?: unknown } };
+        const error = payload.error;
+        return {
+          ...(typeof error?.type === "string" ? { upstreamErrorType: error.type } : {}),
+          ...(typeof error?.message === "string" ? { upstreamErrorMessage: error.message.slice(0, 500) } : {}),
+        };
+      } catch {
+        return {};
+      }
+    };
+    void Promise.all([readUsage(copy), readProviderError()]).then(([usage, providerError]) => {
       const providerHeaders = response.status >= 400
         ? {
             ...(response.headers.get("retry-after") ? { retryAfter: response.headers.get("retry-after") } : {}),
@@ -97,6 +111,7 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
         status: response.status,
         durationMs: Math.round(performance.now() - startedAt),
         ...providerHeaders,
+        ...providerError,
         ...(usage ? { usage } : {}),
       });
     });

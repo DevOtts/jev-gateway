@@ -95,7 +95,7 @@ describe("baseline mode", () => {
   it("records provider retry and request identifiers on upstream errors", async () => {
     const entries: Record<string, unknown>[] = [];
     const upstream = (async () =>
-      new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+      new Response(JSON.stringify({ error: { type: "rate_limit_error", message: "rate limited" } }), {
         status: 429,
         headers: { "content-type": "application/json", "retry-after": "17", "request-id": "req_test_123" },
       })) as unknown as typeof fetch;
@@ -104,7 +104,13 @@ describe("baseline mode", () => {
     await post(app);
     await settled();
 
-    expect(entries[0]).toMatchObject({ status: 429, retryAfter: "17", upstreamRequestId: "req_test_123" });
+    expect(entries[0]).toMatchObject({
+      status: 429,
+      retryAfter: "17",
+      upstreamRequestId: "req_test_123",
+      upstreamErrorType: "rate_limit_error",
+      upstreamErrorMessage: "rate limited",
+    });
   });
 
   it("can be switched at runtime, by this machine's pages only", async () => {
