@@ -57,11 +57,11 @@ describe("debug dumps (JEV_DEBUG_DUMP_DIR)", () => {
         stream: true,
       }),
     });
-    await expect.poll(() => readdirSync(dir!).length).toBe(2);
+    await expect.poll(() => readdirSync(dir!).length).toBe(3);
 
-    const [request, response] = readdirSync(dir)
-      .sort()
-      .map((name) => JSON.parse(readFileSync(join(dir!, name), "utf8")));
+    const names = readdirSync(dir).sort();
+    const request = JSON.parse(readFileSync(join(dir!, names.find((name) => name.endsWith("-request.json"))!), "utf8"));
+    const response = JSON.parse(readFileSync(join(dir!, names.find((name) => name.endsWith("-response.json"))!), "utf8"));
     expect(request).toMatchObject({ path: "/v1/responses", body: { input: "list files" } });
     expect(JSON.stringify(request)).not.toContain("eyJsecret");
     expect(response).toEqual({
