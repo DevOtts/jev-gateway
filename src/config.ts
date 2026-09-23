@@ -35,6 +35,8 @@ export interface Config {
   client: string;
   /** Experimental: return the upstream stream without the client-abort wrapper. */
   rawResponse: boolean;
+  /** Experimental: preserve request framing when forwarding an unchanged byte body. */
+  preserveFraming: boolean;
   /** JSON-lines file this process's stdout is appended to, if any: the dashboard's history. */
   logFile?: string;
 }
@@ -88,6 +90,7 @@ export function loadConfig(env: Env = process.env): Config {
     debugDumpDir: str(env, "JEV_DEBUG_DUMP_DIR"),
     client: str(env, "JEV_CLIENT") ?? "standalone",
     rawResponse: bool(env, "JEV_RAW_RESPONSE", false),
+    preserveFraming: bool(env, "JEV_PRESERVE_FRAMING", false),
     logFile: str(env, "JEV_LOG_FILE"),
   };
   if (config.routerApiKey && !config.upstreamApiKey) {

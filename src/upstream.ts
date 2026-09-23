@@ -13,6 +13,8 @@ export interface ForwardOptions {
   body?: string | Uint8Array;
   /** Headers added to the response so callers can see what the router did. */
   responseHeaders?: Record<string, string>;
+  /** Optional redacted request metadata sink used by debug dumps. */
+  debug?: (kind: string, data: Record<string, unknown>) => void;
 }
 
 /**
@@ -57,6 +59,15 @@ export async function forward(
   if (config.upstreamApiKey) headers.set("authorization", `Bearer ${config.upstreamApiKey}`);
   if (typeof options.body === "string") headers.delete("content-encoding");
 
+  // Controlled transport experiment for Claude Code: when routing has already consumed the
+  // request, the byte body is unchanged. Restore only the framing values that still describe
+  // that exact body; never restore them for rewritten JSON or streamed passthrough requests.
+  if (config.preserveFraming && options.body instanceof Uint8Array) {
+    headers.set("content-length", String(options.body.byteLength));
+    const acceptEncoding = incoming.headers.get("accept-encoding");
+    if (acceptEncoding) headers.set("accept-encoding", acceptEncoding);
+  }
+
   const hasBody = incoming.method !== "GET" && incoming.method !== "HEAD";
   const init: RequestInit & { duplex?: "half" } = { method: incoming.method, headers, signal: incoming.signal };
   if (options.body !== undefined) {
@@ -65,6 +76,13 @@ export async function forward(
     init.body = incoming.body;
     init.duplex = "half";
   }
+
+  options.debug?.("upstream-request", {
+    method: incoming.method,
+    url: target,
+    headers: Object.fromEntries([...headers].map(([name, value]) => [name, /auth|cookie|token|secret|key|account|session|signature/i.test(name) ? "[redacted]" : value])),
+    bodyBytes: typeof options.body === "string" ? Buffer.byteLength(options.body) : options.body?.byteLength,
+  });
 
   let upstream: Response;
   try {
