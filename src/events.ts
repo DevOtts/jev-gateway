@@ -17,6 +17,9 @@ export interface RouteEvent {
   confidence?: number;
   /** Upstream HTTP status; absent for `direct`, which never calls upstream. */
   status?: number;
+  /** Provider hints useful when a large request is rate-limited or rejected. */
+  retryAfter?: string;
+  upstreamRequestId?: string;
   /** How long the whole request took, reply included. */
   durationMs?: number;
   /** What the LLM call cost, as the provider reported it; absent for `direct` and failed calls. */
@@ -56,6 +59,8 @@ function toEvent(entry: Record<string, unknown>, seq: number): RouteEvent | unde
     tool: text(entry.tool),
     confidence: number(entry.confidence),
     status: number(entry.status),
+    retryAfter: text(entry.retryAfter),
+    upstreamRequestId: text(entry.upstreamRequestId),
     durationMs: number(entry.durationMs),
     usage: usage && {
       input: number(usage.input) ?? 0,

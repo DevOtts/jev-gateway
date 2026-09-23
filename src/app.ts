@@ -81,9 +81,25 @@ export function createApp({ config, askJev, fetch: fetchImpl = fetch, log: write
    */
   const logWhenDone = (entry: Record<string, unknown>, response: Response, startedAt: number) => {
     const copy = response.clone();
-    void readUsage(copy).then((usage) =>
-      log({ ...entry, status: response.status, durationMs: Math.round(performance.now() - startedAt), ...(usage ? { usage } : {}) }),
-    );
+    void readUsage(copy).then((usage) => {
+      const providerHeaders = response.status >= 400
+        ? {
+            ...(response.headers.get("retry-after") ? { retryAfter: response.headers.get("retry-after") } : {}),
+            ...(response.headers.get("request-id")
+              ? { upstreamRequestId: response.headers.get("request-id") }
+              : response.headers.get("x-request-id")
+                ? { upstreamRequestId: response.headers.get("x-request-id") }
+                : {}),
+          }
+        : {};
+      log({
+        ...entry,
+        status: response.status,
+        durationMs: Math.round(performance.now() - startedAt),
+        ...providerHeaders,
+        ...(usage ? { usage } : {}),
+      });
+    });
   };
 
   // Routing can be switched off at runtime to measure a baseline: same clients, same traffic,

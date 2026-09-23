@@ -92,6 +92,21 @@ describe("baseline mode", () => {
     expect(events[0].durationMs).toBeGreaterThanOrEqual(0);
   });
 
+  it("records provider retry and request identifiers on upstream errors", async () => {
+    const entries: Record<string, unknown>[] = [];
+    const upstream = (async () =>
+      new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "17", "request-id": "req_test_123" },
+      })) as unknown as typeof fetch;
+    const app = createApp({ config: testConfig({ routing: false }), askJev: fakeJev({}).askJev, fetch: upstream, log: (entry) => entries.push(entry) });
+
+    await post(app);
+    await settled();
+
+    expect(entries[0]).toMatchObject({ status: 429, retryAfter: "17", upstreamRequestId: "req_test_123" });
+  });
+
   it("can be switched at runtime, by this machine's pages only", async () => {
     const jev = fakeJev({ tool: { choice: "get_weather" }, needs_tool: { noul: 0.9 } });
     const app = createApp({ config: testConfig({ directCalls: false }), askJev: jev.askJev, fetch: upstream });
