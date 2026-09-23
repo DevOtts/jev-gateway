@@ -64,6 +64,29 @@ describe("chatAdapter.toInput + buildState", () => {
 });
 
 describe("POST /v1/chat/completions", () => {
+  it.each([
+    ["no arguments", { type: "object", properties: {} }],
+    ["only constant arguments", { type: "object", properties: { mode: { const: "brief" } }, required: ["mode"] }],
+  ])("forces the tool instead of answering when direct calls are off and it takes %s", async (_name, parameters) => {
+    const { app, post, upstream } = setup(
+      { tool: { choice: "status" }, needs_tool: { noul: 0.99 } },
+      testConfig({ directCalls: false }),
+    );
+    const body = {
+      model: "m", messages: [{ role: "user", content: "Show status" }],
+      tools: [{ type: "function", function: { name: "status", parameters } }],
+    };
+    const res = await post(body);
+    expect(res.headers.get("x-jev-gateway-mode")).toBe("forced");
+    expect(upstream.calls).toHaveLength(1);
+    expect(upstream.calls[0]!.body.tool_choice).toEqual({ type: "function", function: { name: "status" } });
+    const decision = await app.request("/router/decide", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    expect(await decision.json()).toMatchObject({ mode: "forced", tool: "status" });
+    expect(upstream.calls).toHaveLength(1);
+  });
+
   it("answers directly, without the LLM, when Jev can fill every argument", async () => {
     const { post, upstream } = setup(lightsAnswers);
     const res = await post(chat("turn on the kitchen lights"));

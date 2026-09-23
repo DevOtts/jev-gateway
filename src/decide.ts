@@ -191,7 +191,7 @@ export async function decide(input: RouterInput, config: Config, askJev: AskJev)
   if (tool.namespace) return { mode: "passthrough", reason: "namespaced_tool_selected", jev };
 
   const resolved = plan.closedParams && resolveArgs(plan, toolIndex, result.answers, config.argMinCertainty);
-  if (resolved) {
+  if (config.directCalls && resolved) {
     return {
       mode: "direct",
       tool: plan.name,
