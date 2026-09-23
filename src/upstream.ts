@@ -5,6 +5,15 @@ import type { Config } from "./config.js";
 const DROPPED_REQUEST_HEADERS = new Set(["host", "connection", "content-length", "accept-encoding", "transfer-encoding"]);
 const DROPPED_RESPONSE_HEADERS = new Set(["connection", "content-length", "content-encoding", "transfer-encoding"]);
 
+const retryDelayMs = (response: Response) => {
+  const value = response.headers.get("retry-after");
+  if (!value) return 250;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.min(Math.max(seconds * 1_000, 0), 3_000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.min(Math.max(date - Date.now(), 0), 3_000) : 250;
+};
+
 export interface ForwardOptions {
   /**
    * Body to send instead of streaming the incoming one: the original bytes (already consumed
@@ -87,6 +96,14 @@ export async function forward(
   let upstream: Response;
   try {
     upstream = await fetchImpl(target, init);
+    // Claude Code reacts badly when a transient rate limit is exposed during its startup
+    // probe: it enters its automatic context-management UI before retrying. Routed requests
+    // have a replayable body, so absorb one 429 inside the gateway instead of exposing it.
+    if (config.retryUpstreamRateLimit && options.body !== undefined && upstream.status === 429) {
+      await upstream.body?.cancel();
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs(upstream)));
+      upstream = await fetchImpl(target, init);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return Response.json(
