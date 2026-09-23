@@ -82,5 +82,6 @@ export async function forward(
     if (!DROPPED_RESPONSE_HEADERS.has(name)) responseHeaders.set(name, value);
   });
   for (const [name, value] of Object.entries(options.responseHeaders ?? {})) responseHeaders.set(name, value);
-  return new Response(quietOnClientAbort(upstream.body, incoming.signal), { status: upstream.status, headers: responseHeaders });
+  const body = config.rawResponse ? upstream.body : quietOnClientAbort(upstream.body, incoming.signal);
+  return new Response(body, { status: upstream.status, headers: responseHeaders });
 }
